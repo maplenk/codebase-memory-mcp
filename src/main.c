@@ -150,7 +150,7 @@ static void print_help(void) {
     printf("  Claude Code, Codex CLI, Gemini CLI, Zed, OpenCode, Antigravity, Aider, KiloCode\n");
     printf("\nTools: index_repository, search_graph, query_graph, trace_call_path,\n");
     printf("  get_code_snippet, get_graph_schema, get_architecture,\n");
-    printf("  get_architecture_summary, search_code,\n");
+    printf("  get_architecture_summary, get_impact_analysis, search_code,\n");
     printf("  get_key_symbols,\n");
     printf("  list_projects, delete_project, index_status, detect_changes,\n");
     printf("  manage_adr, ingest_traces\n");

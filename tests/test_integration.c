@@ -393,6 +393,20 @@ TEST(integ_mcp_get_key_symbols) {
     PASS();
 }
 
+TEST(integ_mcp_get_impact_analysis) {
+    char args[256];
+    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"symbol\":\"Add\",\"depth\":3}", g_project);
+
+    char *resp = call_tool("get_impact_analysis", args);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "\"symbol\":\"Add\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"impact\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"risk_score\""));
+    ASSERT_TRUE(strstr(resp, "Multiply") || strstr(resp, "Compute"));
+    free(resp);
+    PASS();
+}
+
 TEST(integ_mcp_trace_call_path) {
     /* Trace outbound calls from Compute → should reach Add and Multiply */
     char args[256];
@@ -575,7 +589,7 @@ SUITE(integration) {
     if (integration_setup() != 0) {
         printf("  %-50s", "integration_setup");
         printf("SKIP (setup failed)\n");
-        tf_skip_count += 25; /* skip all integration tests */
+        tf_skip_count += 26; /* skip all integration tests */
         integration_teardown();
         return;
     }
@@ -597,6 +611,7 @@ SUITE(integration) {
     RUN_TEST(integ_mcp_get_architecture);
     RUN_TEST(integ_mcp_get_architecture_summary);
     RUN_TEST(integ_mcp_get_key_symbols);
+    RUN_TEST(integ_mcp_get_impact_analysis);
     RUN_TEST(integ_mcp_trace_call_path);
     RUN_TEST(integ_mcp_index_status);
 
