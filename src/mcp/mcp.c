@@ -1,5 +1,5 @@
 /*
- * mcp.c — MCP server: JSON-RPC 2.0 over stdio with 14 graph tools.
+ * mcp.c — MCP server: JSON-RPC 2.0 over stdio with 15 graph tools.
  *
  * Uses yyjson for fast JSON parsing/building.
  * Single-threaded event loop: read line → parse → dispatch → respond.
@@ -34,6 +34,7 @@
 #endif
 #include <yyjson/yyjson.h>
 #include <stdint.h> // int64_t
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,6 +78,111 @@ static char *yy_doc_to_str(yyjson_mut_doc *doc) {
     size_t len = 0;
     char *s = yyjson_mut_write(doc, YYJSON_WRITE_ALLOW_INVALID_UNICODE, &len);
     return s;
+}
+
+typedef struct {
+    char *buf;
+    size_t len;
+    size_t cap;
+    size_t limit;
+    bool truncated;
+} markdown_builder_t;
+
+static void markdown_builder_init(markdown_builder_t *b, size_t limit) {
+    b->cap = 512;
+    b->buf = malloc(b->cap);
+    b->len = 0;
+    b->limit = limit;
+    b->truncated = false;
+    if (b->buf) {
+        b->buf[0] = '\0';
+    }
+}
+
+static bool markdown_builder_reserve(markdown_builder_t *b, size_t need) {
+    if (!b->buf) {
+        return false;
+    }
+    while (b->len + need + 1 > b->cap) {
+        b->cap *= 2;
+        b->buf = safe_realloc(b->buf, b->cap);
+    }
+    return true;
+}
+
+static bool markdown_builder_append_raw(markdown_builder_t *b, const char *text) {
+    if (!b || !b->buf || !text || b->truncated) {
+        return false;
+    }
+    size_t add = strlen(text);
+    if (b->len + add > b->limit) {
+        b->truncated = true;
+        return false;
+    }
+    if (!markdown_builder_reserve(b, add)) {
+        return false;
+    }
+    memcpy(b->buf + b->len, text, add);
+    b->len += add;
+    b->buf[b->len] = '\0';
+    return true;
+}
+
+static bool markdown_builder_appendf(markdown_builder_t *b, const char *fmt, ...) {
+    if (!b || !b->buf || !fmt || b->truncated) {
+        return false;
+    }
+
+    va_list ap;
+    va_start(ap, fmt);
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
+    int needed = vsnprintf(NULL, 0, fmt, ap_copy);
+    va_end(ap_copy);
+    if (needed < 0) {
+        va_end(ap);
+        return false;
+    }
+    if (b->len + (size_t)needed > b->limit) {
+        b->truncated = true;
+        va_end(ap);
+        return false;
+    }
+    if (!markdown_builder_reserve(b, (size_t)needed)) {
+        va_end(ap);
+        return false;
+    }
+    vsnprintf(b->buf + b->len, b->cap - b->len, fmt, ap);
+    va_end(ap);
+    b->len += (size_t)needed;
+    return true;
+}
+
+static char *markdown_builder_finish(markdown_builder_t *b) {
+    const char *note = "\n_Truncated at max_tokens._\n";
+    if (!b || !b->buf) {
+        return NULL;
+    }
+    if (b->truncated) {
+        size_t note_len = strlen(note);
+        if (note_len <= b->limit) {
+            size_t keep_len = b->len;
+            size_t final_len = 0;
+            if (keep_len + note_len > b->limit) {
+                keep_len = b->limit - note_len;
+            }
+            final_len = keep_len + note_len;
+            if (final_len > b->len &&
+                !markdown_builder_reserve(b, final_len - b->len)) {
+                return b->buf;
+            }
+            b->len = keep_len;
+            memcpy(b->buf + b->len, note, note_len);
+            b->len = final_len;
+            b->buf[b->len] = '\0';
+        }
+    }
+    return b->buf;
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -280,6 +386,17 @@ static const tool_def_t TOOLS[] = {
      "structure at a glance.",
      "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"aspects\":{\"type\":"
      "\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"project\"]}"},
+
+    {"get_architecture_summary",
+     "Generate a structured markdown architecture summary from the existing SQLite graph, with "
+     "optional focus filtering and output size control.",
+     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\",\"description\":"
+     "\"Indexed project name (from list_projects).\"},\"project_path\":{\"type\":\"string\","
+     "\"description\":\"Deprecated alias: path to the indexed project.\"},\"max_tokens\":{"
+     "\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output size. Controls "
+     "detail level.\"},\"focus\":{\"type\":\"string\",\"description\":\"Optional domain keyword "
+     "to zoom into (for example payment or inventory).\"}},\"anyOf\":[{\"required\":["
+     "\"project\"]},{\"required\":[\"project_path\"]}]}"},
 
     {"search_code",
      "Graph-augmented code search. Finds text patterns via grep, then enriches results with "
@@ -1215,6 +1332,245 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
 
     char *result = cbm_mcp_text_result(json, false);
     free(json);
+    return result;
+}
+
+static bool same_project_path(const char *lhs, const char *rhs) {
+    if (!lhs || !rhs) {
+        return false;
+    }
+
+    char lhs_real[4096];
+    char rhs_real[4096];
+#ifdef _WIN32
+    if (_fullpath(lhs_real, lhs, sizeof(lhs_real)) && _fullpath(rhs_real, rhs, sizeof(rhs_real))) {
+        return strcmp(lhs_real, rhs_real) == 0;
+    }
+#else
+    if (realpath(lhs, lhs_real) && realpath(rhs, rhs_real)) {
+        return strcmp(lhs_real, rhs_real) == 0;
+    }
+#endif
+    return strcmp(lhs, rhs) == 0;
+}
+
+static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *args) {
+    char *project = cbm_mcp_get_string_arg(args, "project");
+    char *project_path = cbm_mcp_get_string_arg(args, "project_path");
+    char *focus = cbm_mcp_get_string_arg(args, "focus");
+    int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", 2000);
+    char *display_path = NULL;
+
+    if (!project && !project_path) {
+        free(focus);
+        return cbm_mcp_text_result("project is required", true);
+    }
+    if (max_tokens <= 0) {
+        max_tokens = 2000;
+    }
+
+    if (!project) {
+        project = cbm_project_name_from_path(project_path);
+        if (!project) {
+            free(project_path);
+            free(focus);
+            return cbm_mcp_text_result("unable to derive project name from project_path", true);
+        }
+    }
+
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store) {
+        char *_err = build_project_list_error("project not found or not indexed");
+        char *_res = cbm_mcp_text_result(_err, true);
+        free(_err);
+        free(project);
+        free(project_path);
+        free(focus);
+        return _res;
+    }
+
+    cbm_project_t proj_info = {0};
+    if (cbm_store_get_project(store, project, &proj_info) != CBM_STORE_OK) {
+        cbm_project_free_fields(&proj_info);
+        free(project);
+        free(project_path);
+        free(focus);
+        return cbm_mcp_text_result("project is not indexed", true);
+    }
+    if (project_path && proj_info.root_path && proj_info.root_path[0] &&
+        !same_project_path(project_path, proj_info.root_path)) {
+        cbm_project_free_fields(&proj_info);
+        free(project);
+        free(project_path);
+        free(focus);
+        return cbm_mcp_text_result("project_path does not match project", true);
+    }
+    if (proj_info.root_path && proj_info.root_path[0]) {
+        display_path = heap_strdup(proj_info.root_path);
+    } else if (project_path && project_path[0]) {
+        display_path = heap_strdup(project_path);
+    }
+    cbm_project_free_fields(&proj_info);
+
+    cbm_architecture_summary_t summary = {0};
+    if (cbm_store_get_architecture_summary(store, project, focus, &summary) != CBM_STORE_OK) {
+        free(project);
+        free(project_path);
+        free(display_path);
+        free(focus);
+        return cbm_mcp_text_result("failed to build architecture summary", true);
+    }
+
+    size_t char_budget = (size_t)max_tokens * 4U;
+    if (char_budget < 512) {
+        char_budget = 512;
+    }
+    markdown_builder_t md;
+    markdown_builder_init(&md, char_budget);
+
+    const char *display_name = display_path ? cbm_path_base(display_path) : project;
+    (void)markdown_builder_appendf(&md, "## Project: %s\n", display_name ? display_name : project);
+    if (focus && focus[0]) {
+        (void)markdown_builder_appendf(&md, "Focus: %s\n", focus);
+    }
+    (void)markdown_builder_appendf(&md, "Files: %d | Functions: %d | Classes: %d | Routes: %d\n\n",
+                                   summary.total_files, summary.total_functions,
+                                   summary.total_classes, summary.total_routes);
+
+    (void)markdown_builder_append_raw(&md, "## Key Files (by connectivity)\n");
+    if (summary.file_count == 0) {
+        (void)markdown_builder_append_raw(&md, "No matching files.\n\n");
+    } else {
+        for (int i = 0; i < summary.file_count; i++) {
+            if (!markdown_builder_appendf(&md, "%d. %s - %d inbound calls, %d outbound\n", i + 1,
+                                          summary.files[i].file ? summary.files[i].file : "",
+                                          summary.files[i].inbound_calls,
+                                          summary.files[i].outbound_calls)) {
+                break;
+            }
+            if (summary.files[i].symbol_count > 0) {
+                (void)markdown_builder_append_raw(&md, "   Key methods: ");
+                for (int j = 0; j < summary.files[i].symbol_count; j++) {
+                    if (j > 0 && !markdown_builder_append_raw(&md, ", ")) {
+                        break;
+                    }
+                    if (summary.files[i].symbols[j].span_lines > 0) {
+                        (void)markdown_builder_appendf(
+                            &md, "%s (%d lines)",
+                            summary.files[i].symbols[j].name ? summary.files[i].symbols[j].name : "",
+                            summary.files[i].symbols[j].span_lines);
+                    } else {
+                        (void)markdown_builder_appendf(
+                            &md, "%s",
+                            summary.files[i].symbols[j].name ? summary.files[i].symbols[j].name : "");
+                    }
+                }
+                (void)markdown_builder_append_raw(&md, "\n");
+            }
+        }
+        (void)markdown_builder_append_raw(&md, "\n");
+    }
+
+    (void)markdown_builder_append_raw(&md, "## Route Map\n");
+    if (summary.route_count == 0) {
+        (void)markdown_builder_append_raw(&md, "No matching routes.\n\n");
+    } else {
+        for (int i = 0; i < summary.route_count; i++) {
+            (void)markdown_builder_appendf(
+                &md, "%s %s", summary.routes[i].method ? summary.routes[i].method : "",
+                summary.routes[i].path ? summary.routes[i].path : "");
+            if (summary.routes[i].handler && summary.routes[i].handler[0]) {
+                (void)markdown_builder_appendf(&md, " -> %s", summary.routes[i].handler);
+            }
+            if (summary.routes[i].service && summary.routes[i].service[0]) {
+                (void)markdown_builder_appendf(&md, " -> %s", summary.routes[i].service);
+            }
+            if (summary.routes[i].next && summary.routes[i].next[0]) {
+                (void)markdown_builder_appendf(&md, " -> %s", summary.routes[i].next);
+            }
+            (void)markdown_builder_append_raw(&md, "\n");
+        }
+        (void)markdown_builder_append_raw(&md, "\n");
+    }
+
+    (void)markdown_builder_append_raw(&md, "## Module Clusters (Louvain communities)\n");
+    if (summary.cluster_count == 0) {
+        (void)markdown_builder_append_raw(&md, "No multi-file clusters found.\n\n");
+    } else {
+        for (int i = 0; i < summary.cluster_count; i++) {
+            (void)markdown_builder_appendf(&md, "Cluster %d (%d files)\n", summary.clusters[i].id,
+                                           summary.clusters[i].file_count);
+            if (summary.clusters[i].core_file_count > 0) {
+                (void)markdown_builder_append_raw(&md, "Core: ");
+                for (int j = 0; j < summary.clusters[i].core_file_count; j++) {
+                    if (j > 0) {
+                        (void)markdown_builder_append_raw(&md, ", ");
+                    }
+                    (void)markdown_builder_appendf(
+                        &md, "%s",
+                        summary.clusters[i].core_files[j]
+                            ? cbm_path_base(summary.clusters[i].core_files[j])
+                            : "");
+                }
+                (void)markdown_builder_append_raw(&md, "\n");
+            }
+            if (summary.clusters[i].entry_point_count > 0) {
+                (void)markdown_builder_append_raw(&md, "Entry: ");
+                for (int j = 0; j < summary.clusters[i].entry_point_count; j++) {
+                    if (j > 0) {
+                        (void)markdown_builder_append_raw(&md, ", ");
+                    }
+                    (void)markdown_builder_appendf(
+                        &md, "%s",
+                        summary.clusters[i].entry_points[j]
+                            ? summary.clusters[i].entry_points[j]
+                            : "");
+                }
+                (void)markdown_builder_append_raw(&md, "\n");
+            }
+            (void)markdown_builder_append_raw(&md, "\n");
+        }
+    }
+
+    (void)markdown_builder_append_raw(&md, "## High-Connectivity Functions (in_degree >= 5)\n");
+    if (summary.function_count == 0) {
+        (void)markdown_builder_append_raw(&md, "None above threshold.\n\n");
+    } else {
+        for (int i = 0; i < summary.function_count; i++) {
+            (void)markdown_builder_appendf(
+                &md, "%s - called by %d functions",
+                summary.functions[i].name ? summary.functions[i].name : "",
+                summary.functions[i].in_degree);
+            if (summary.functions[i].file && summary.functions[i].file[0]) {
+                (void)markdown_builder_appendf(&md, " [%s]", summary.functions[i].file);
+            }
+            (void)markdown_builder_append_raw(&md, "\n");
+        }
+        (void)markdown_builder_append_raw(&md, "\n");
+    }
+
+    (void)markdown_builder_append_raw(&md, "## Entry Points\n");
+    if (summary.entry_point_count == 0) {
+        (void)markdown_builder_append_raw(&md, "No matching entry points.\n");
+    } else {
+        for (int i = 0; i < summary.entry_point_count; i++) {
+            (void)markdown_builder_appendf(&md, "%s: %d\n",
+                                           summary.entry_points[i].kind
+                                               ? summary.entry_points[i].kind
+                                               : "Other",
+                                           summary.entry_points[i].count);
+        }
+    }
+
+    char *markdown = markdown_builder_finish(&md);
+    char *result = cbm_mcp_text_result(markdown ? markdown : "", false);
+
+    free(markdown);
+    cbm_store_architecture_summary_free(&summary);
+    free(project);
+    free(project_path);
+    free(display_path);
+    free(focus);
     return result;
 }
 
@@ -2703,6 +3059,9 @@ char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const ch
     }
     if (strcmp(tool_name, "get_architecture") == 0) {
         return handle_get_architecture(srv, args_json);
+    }
+    if (strcmp(tool_name, "get_architecture_summary") == 0) {
+        return handle_get_architecture_summary(srv, args_json);
     }
 
     /* Pipeline-dependent tools */

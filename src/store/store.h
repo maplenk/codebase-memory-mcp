@@ -514,6 +514,69 @@ int cbm_store_get_architecture(cbm_store_t *s, const char *project, const char *
                                int aspect_count, cbm_architecture_info_t *out);
 void cbm_store_architecture_free(cbm_architecture_info_t *out);
 
+typedef struct {
+    const char *name;
+    int span_lines;
+} cbm_arch_summary_symbol_t;
+
+typedef struct {
+    const char *file;
+    int inbound_calls;
+    int outbound_calls;
+    cbm_arch_summary_symbol_t *symbols;
+    int symbol_count;
+} cbm_arch_summary_file_t;
+
+typedef struct {
+    const char *method;
+    const char *path;
+    const char *handler;
+    const char *service;
+    const char *next;
+    const char *handler_file;
+} cbm_arch_summary_route_t;
+
+typedef struct {
+    int id;
+    int file_count;
+    const char **core_files;
+    int core_file_count;
+    const char **entry_points;
+    int entry_point_count;
+} cbm_arch_summary_cluster_t;
+
+typedef struct {
+    const char *name;
+    const char *file;
+    int in_degree;
+} cbm_arch_summary_function_t;
+
+typedef struct {
+    const char *kind;
+    int count;
+} cbm_arch_summary_entry_group_t;
+
+typedef struct {
+    cbm_arch_summary_file_t *files;
+    cbm_arch_summary_route_t *routes;
+    cbm_arch_summary_cluster_t *clusters;
+    cbm_arch_summary_function_t *functions;
+    cbm_arch_summary_entry_group_t *entry_points;
+    int total_files;
+    int total_functions;
+    int total_classes;
+    int total_routes;
+    int file_count;
+    int route_count;
+    int cluster_count;
+    int function_count;
+    int entry_point_count;
+} cbm_architecture_summary_t;
+
+int cbm_store_get_architecture_summary(cbm_store_t *s, const char *project, const char *focus,
+                                       cbm_architecture_summary_t *out);
+void cbm_store_architecture_summary_free(cbm_architecture_summary_t *out);
+
 /* ── ADR (Architecture Decision Record) ────────────────────────── */
 
 #define CBM_ADR_MAX_LENGTH 8000

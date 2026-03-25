@@ -10,6 +10,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* ── Schema / Open / Close ──────────────────────────────────────── */
 
@@ -108,6 +110,33 @@ TEST(store_project_delete) {
     ASSERT_EQ(rc, CBM_STORE_NOT_FOUND);
 
     cbm_store_close(s);
+    PASS();
+}
+
+TEST(store_open_path_query_readonly_db) {
+    char path[] = "/tmp/cbm_store_query_XXXXXX";
+    int fd = mkstemp(path);
+    ASSERT_TRUE(fd >= 0);
+    close(fd);
+
+    cbm_store_t *writer = cbm_store_open_path(path);
+    ASSERT_NOT_NULL(writer);
+    ASSERT_EQ(cbm_store_upsert_project(writer, "readonly-proj", "/tmp/readonly-proj"), CBM_STORE_OK);
+    cbm_store_close(writer);
+
+    ASSERT_EQ(chmod(path, 0444), 0);
+
+    cbm_store_t *reader = cbm_store_open_path_query(path);
+    ASSERT_NOT_NULL(reader);
+
+    cbm_project_t proj = {0};
+    ASSERT_EQ(cbm_store_get_project(reader, "readonly-proj", &proj), CBM_STORE_OK);
+    ASSERT_STR_EQ(proj.root_path, "/tmp/readonly-proj");
+    cbm_project_free_fields(&proj);
+    cbm_store_close(reader);
+
+    chmod(path, 0644);
+    unlink(path);
     PASS();
 }
 
@@ -1511,6 +1540,7 @@ SUITE(store_nodes) {
     RUN_TEST(store_project_crud);
     RUN_TEST(store_project_update);
     RUN_TEST(store_project_delete);
+    RUN_TEST(store_open_path_query_readonly_db);
     RUN_TEST(store_node_crud);
     RUN_TEST(store_node_dedup);
     RUN_TEST(store_node_find_by_label);

@@ -367,6 +367,20 @@ TEST(integ_mcp_get_architecture) {
     PASS();
 }
 
+TEST(integ_mcp_get_architecture_summary) {
+    char args[512];
+    snprintf(args, sizeof(args),
+             "{\"project\":\"%s\",\"max_tokens\":1200,\"focus\":\"main\"}", g_project);
+
+    char *resp = call_tool("get_architecture_summary", args);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "## Project:"));
+    ASSERT_NOT_NULL(strstr(resp, "## Key Files"));
+    ASSERT_NOT_NULL(strstr(resp, "main.py"));
+    free(resp);
+    PASS();
+}
+
 TEST(integ_mcp_trace_call_path) {
     /* Trace outbound calls from Compute → should reach Add and Multiply */
     char args[256];
@@ -554,6 +568,7 @@ SUITE(integration) {
     RUN_TEST(integ_mcp_query_graph_calls);
     RUN_TEST(integ_mcp_get_graph_schema);
     RUN_TEST(integ_mcp_get_architecture);
+    RUN_TEST(integ_mcp_get_architecture_summary);
     RUN_TEST(integ_mcp_trace_call_path);
     RUN_TEST(integ_mcp_index_status);
 

@@ -6,10 +6,12 @@
 #include "../src/foundation/compat.h"
 #include "test_framework.h"
 #include <mcp/mcp.h>
+#include <pipeline/pipeline.h>
 #include <store/store.h>
 #include <yyjson/yyjson.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 /* ══════════════════════════════════════════════════════════════════
  *  JSON-RPC PARSING
@@ -129,7 +131,7 @@ TEST(mcp_initialize_response) {
 TEST(mcp_tools_list) {
     char *json = cbm_mcp_tools_list();
     ASSERT_NOT_NULL(json);
-    /* Should contain all 14 tools */
+    /* Should contain all 15 tools */
     ASSERT_NOT_NULL(strstr(json, "index_repository"));
     ASSERT_NOT_NULL(strstr(json, "search_graph"));
     ASSERT_NOT_NULL(strstr(json, "query_graph"));
@@ -137,6 +139,7 @@ TEST(mcp_tools_list) {
     ASSERT_NOT_NULL(strstr(json, "get_code_snippet"));
     ASSERT_NOT_NULL(strstr(json, "get_graph_schema"));
     ASSERT_NOT_NULL(strstr(json, "get_architecture"));
+    ASSERT_NOT_NULL(strstr(json, "get_architecture_summary"));
     ASSERT_NOT_NULL(strstr(json, "search_code"));
     ASSERT_NOT_NULL(strstr(json, "list_projects"));
     ASSERT_NOT_NULL(strstr(json, "delete_project"));
@@ -487,6 +490,142 @@ TEST(tool_get_architecture_empty) {
     free(resp);
 
     cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_get_architecture_summary_missing_project) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+
+    char *resp =
+        cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"tools/call\","
+                                   "\"params\":{\"name\":\"get_architecture_summary\","
+                                   "\"arguments\":{}}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "project is required"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+static cbm_mcp_server_t *setup_arch_summary_server(char *tmp_dir, size_t tmp_sz) {
+    snprintf(tmp_dir, tmp_sz, "/tmp/cbm_mcp_arch_XXXXXX");
+    if (!cbm_mkdtemp(tmp_dir)) {
+        return NULL;
+    }
+
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    if (!srv) {
+        rmdir(tmp_dir);
+        return NULL;
+    }
+
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    if (!st) {
+        cbm_mcp_server_free(srv);
+        rmdir(tmp_dir);
+        return NULL;
+    }
+
+    char *proj_name = cbm_project_name_from_path(tmp_dir);
+    if (!proj_name) {
+        cbm_mcp_server_free(srv);
+        rmdir(tmp_dir);
+        return NULL;
+    }
+
+    cbm_mcp_server_set_project(srv, proj_name);
+    cbm_store_upsert_project(st, proj_name, tmp_dir);
+
+    int64_t prev_fn_id = 0;
+    for (int i = 0; i < 24; i++) {
+        char file_name[64];
+        char file_qn[128];
+        char fn_name[32];
+        char fn_qn[160];
+
+        snprintf(file_name, sizeof(file_name), "pkg/file%02d.go", i);
+        snprintf(file_qn, sizeof(file_qn), "%s.pkg.file%02d", proj_name, i);
+        snprintf(fn_name, sizeof(fn_name), "Fn%02d", i);
+        snprintf(fn_qn, sizeof(fn_qn), "%s.pkg.file%02d.%s", proj_name, i, fn_name);
+
+        cbm_node_t file = {.project = proj_name,
+                           .label = "File",
+                           .name = file_name,
+                           .qualified_name = file_qn,
+                           .file_path = file_name};
+        cbm_store_upsert_node(st, &file);
+
+        cbm_node_t fn = {.project = proj_name,
+                         .label = "Function",
+                         .name = fn_name,
+                         .qualified_name = fn_qn,
+                         .file_path = file_name,
+                         .start_line = 1,
+                         .end_line = 40 + i};
+        int64_t fn_id = cbm_store_upsert_node(st, &fn);
+        if (prev_fn_id > 0) {
+            cbm_edge_t edge = {
+                .project = proj_name, .source_id = prev_fn_id, .target_id = fn_id, .type = "CALLS"};
+            cbm_store_insert_edge(st, &edge);
+        }
+        prev_fn_id = fn_id;
+    }
+
+    free(proj_name);
+    return srv;
+}
+
+static void cleanup_arch_summary_server(char *tmp_dir, cbm_mcp_server_t *srv) {
+    cbm_mcp_server_free(srv);
+    if (tmp_dir && tmp_dir[0]) {
+        rmdir(tmp_dir);
+    }
+}
+
+TEST(tool_get_architecture_summary_truncated) {
+    char tmp_dir[256];
+    cbm_mcp_server_t *srv = setup_arch_summary_server(tmp_dir, sizeof(tmp_dir));
+    ASSERT_NOT_NULL(srv);
+    char *proj_name = cbm_project_name_from_path(tmp_dir);
+    ASSERT_NOT_NULL(proj_name);
+
+    char req[1024];
+    snprintf(req, sizeof(req),
+             "{\"jsonrpc\":\"2.0\",\"id\":26,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"get_architecture_summary\","
+              "\"arguments\":{\"project\":\"%s\",\"max_tokens\":1}}}",
+             proj_name);
+
+    char *resp = cbm_mcp_server_handle(srv, req);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "## Project:"));
+    ASSERT_NOT_NULL(strstr(resp, "_Truncated at max_tokens._"));
+    free(resp);
+    free(proj_name);
+
+    cleanup_arch_summary_server(tmp_dir, srv);
+    PASS();
+}
+
+TEST(tool_get_architecture_summary_project_path_alias) {
+    char tmp_dir[256];
+    cbm_mcp_server_t *srv = setup_arch_summary_server(tmp_dir, sizeof(tmp_dir));
+    ASSERT_NOT_NULL(srv);
+
+    char req[1024];
+    snprintf(req, sizeof(req),
+             "{\"jsonrpc\":\"2.0\",\"id\":27,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"get_architecture_summary\","
+             "\"arguments\":{\"project_path\":\"%s\",\"max_tokens\":64}}}",
+             tmp_dir);
+
+    char *resp = cbm_mcp_server_handle(srv, req);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "## Project:"));
+    free(resp);
+
+    cleanup_arch_summary_server(tmp_dir, srv);
     PASS();
 }
 
@@ -1703,6 +1842,9 @@ SUITE(mcp) {
     RUN_TEST(tool_trace_missing_function_name);
     RUN_TEST(tool_delete_project_not_found);
     RUN_TEST(tool_get_architecture_empty);
+    RUN_TEST(tool_get_architecture_summary_missing_project);
+    RUN_TEST(tool_get_architecture_summary_truncated);
+    RUN_TEST(tool_get_architecture_summary_project_path_alias);
     RUN_TEST(tool_query_graph_missing_query);
 
     /* Pipeline-dependent tool handlers */
