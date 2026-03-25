@@ -131,7 +131,7 @@ TEST(mcp_initialize_response) {
 TEST(mcp_tools_list) {
     char *json = cbm_mcp_tools_list();
     ASSERT_NOT_NULL(json);
-    /* Should contain all 15 tools */
+    /* Should contain all public tools */
     ASSERT_NOT_NULL(strstr(json, "index_repository"));
     ASSERT_NOT_NULL(strstr(json, "search_graph"));
     ASSERT_NOT_NULL(strstr(json, "query_graph"));
@@ -139,6 +139,7 @@ TEST(mcp_tools_list) {
     ASSERT_NOT_NULL(strstr(json, "get_code_snippet"));
     ASSERT_NOT_NULL(strstr(json, "get_graph_schema"));
     ASSERT_NOT_NULL(strstr(json, "get_architecture"));
+    ASSERT_NOT_NULL(strstr(json, "get_key_symbols"));
     ASSERT_NOT_NULL(strstr(json, "get_architecture_summary"));
     ASSERT_NOT_NULL(strstr(json, "search_code"));
     ASSERT_NOT_NULL(strstr(json, "list_projects"));
@@ -581,6 +582,51 @@ static void cleanup_arch_summary_server(char *tmp_dir, cbm_mcp_server_t *srv) {
     if (tmp_dir && tmp_dir[0]) {
         rmdir(tmp_dir);
     }
+}
+
+static cbm_mcp_server_t *setup_pagerank_server(void) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    if (!srv) {
+        return NULL;
+    }
+
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    if (!st) {
+        cbm_mcp_server_free(srv);
+        return NULL;
+    }
+
+    cbm_store_upsert_project(st, "test-rank", "/tmp/test-rank");
+    cbm_mcp_server_set_project(srv, "test-rank");
+
+    cbm_node_t nodes[] = {
+        {.project = "test-rank", .label = "Function", .name = "Root", .qualified_name = "test-rank.Root"},
+        {.project = "test-rank", .label = "Function", .name = "Small", .qualified_name = "test-rank.Small"},
+        {.project = "test-rank", .label = "Function", .name = "Hub", .qualified_name = "test-rank.Hub"},
+        {.project = "test-rank", .label = "Function", .name = "Leaf", .qualified_name = "test-rank.Leaf"},
+        {.project = "test-rank", .label = "Function", .name = "CallerB", .qualified_name = "test-rank.CallerB"},
+        {.project = "test-rank", .label = "Function", .name = "CallerC", .qualified_name = "test-rank.CallerC"},
+    };
+    int64_t ids[6];
+    for (int i = 0; i < 6; i++) {
+        ids[i] = cbm_store_upsert_node(st, &nodes[i]);
+    }
+
+    cbm_edge_t edges[] = {
+        {.project = "test-rank", .source_id = ids[0], .target_id = ids[1], .type = "CALLS"},
+        {.project = "test-rank", .source_id = ids[1], .target_id = ids[2], .type = "CALLS"},
+        {.project = "test-rank", .source_id = ids[4], .target_id = ids[2], .type = "CALLS"},
+        {.project = "test-rank", .source_id = ids[5], .target_id = ids[2], .type = "CALLS"},
+    };
+    for (int i = 0; i < 4; i++) {
+        cbm_store_insert_edge(st, &edges[i]);
+    }
+
+    if (cbm_store_compute_pagerank(st, "test-rank", 20, 0.85) != CBM_STORE_OK) {
+        cbm_mcp_server_free(srv);
+        return NULL;
+    }
+    return srv;
 }
 
 TEST(tool_get_architecture_summary_truncated) {
@@ -1118,6 +1164,68 @@ static char *extract_text_content(const char *mcp_result) {
     char *result = str ? strdup(str) : strdup(mcp_result);
     yyjson_doc_free(doc);
     return result;
+}
+
+TEST(tool_search_graph_ranked_pagerank) {
+    cbm_mcp_server_t *srv = setup_pagerank_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "search_graph",
+                                    "{\"project\":\"test-rank\",\"label\":\"Function\",\"limit\":10}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"pagerank\""));
+    ASSERT_NOT_NULL(strstr(text, "\"name\":\"Hub\""));
+    ASSERT_NOT_NULL(strstr(text, "\"name\":\"Small\""));
+    ASSERT_TRUE(strstr(text, "\"name\":\"Hub\"") < strstr(text, "\"name\":\"Small\""));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_get_key_symbols_ranked) {
+    cbm_mcp_server_t *srv = setup_pagerank_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw =
+        cbm_mcp_handle_tool(srv, "get_key_symbols", "{\"project\":\"test-rank\",\"limit\":3}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"results\""));
+    ASSERT_NOT_NULL(strstr(text, "\"pagerank\""));
+    ASSERT_NOT_NULL(strstr(text, "\"name\":\"Hub\""));
+    ASSERT_TRUE(strstr(text, "\"name\":\"Hub\"") < strstr(text, "\"name\":\"Small\""));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_trace_call_path_ranked_pagerank) {
+    cbm_mcp_server_t *srv = setup_pagerank_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(
+        srv, "trace_call_path",
+        "{\"project\":\"test-rank\",\"function_name\":\"Root\",\"direction\":\"outbound\",\"depth\":3}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"callees\""));
+    ASSERT_NOT_NULL(strstr(text, "\"pagerank\""));
+    ASSERT_NOT_NULL(strstr(text, "\"name\":\"Hub\""));
+    ASSERT_NOT_NULL(strstr(text, "\"name\":\"Small\""));
+    ASSERT_TRUE(strstr(text, "\"name\":\"Hub\"") < strstr(text, "\"name\":\"Small\""));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
 }
 
 /* Call get_code_snippet and extract inner text content.
@@ -1834,6 +1942,7 @@ SUITE(mcp) {
     RUN_TEST(tool_get_graph_schema_empty);
     RUN_TEST(tool_unknown_tool);
     RUN_TEST(tool_search_graph_basic);
+    RUN_TEST(tool_search_graph_ranked_pagerank);
     RUN_TEST(tool_query_graph_basic);
     RUN_TEST(tool_index_status_no_project);
 
@@ -1845,6 +1954,8 @@ SUITE(mcp) {
     RUN_TEST(tool_get_architecture_summary_missing_project);
     RUN_TEST(tool_get_architecture_summary_truncated);
     RUN_TEST(tool_get_architecture_summary_project_path_alias);
+    RUN_TEST(tool_get_key_symbols_ranked);
+    RUN_TEST(tool_trace_call_path_ranked_pagerank);
     RUN_TEST(tool_query_graph_missing_query);
 
     /* Pipeline-dependent tool handlers */

@@ -1,5 +1,5 @@
 /*
- * mcp.c — MCP server: JSON-RPC 2.0 over stdio with 15 graph tools.
+ * mcp.c — MCP server: JSON-RPC 2.0 over stdio with 16 graph tools.
  *
  * Uses yyjson for fast JSON parsing/building.
  * Single-threaded event loop: read line → parse → dispatch → respond.
@@ -347,7 +347,9 @@ static const tool_def_t TOOLS[] = {
      "{\"type\":\"integer\"},\"max_degree\":{\"type\":\"integer\"},\"exclude_entry_points\":{"
      "\"type\":\"boolean\"},\"include_connected\":{\"type\":\"boolean\"},\"limit\":{\"type\":"
      "\"integer\",\"description\":\"Max results. Default: "
-     "unlimited\"},\"offset\":{\"type\":\"integer\",\"default\":0}},\"required\":[\"project\"]}"},
+     "unlimited\"},\"offset\":{\"type\":\"integer\",\"default\":0},\"ranked\":{\"type\":\"boolean\","
+     "\"default\":true,\"description\":\"Sort results by PageRank importance when available.\"}},"
+     "\"required\":[\"project\"]}"},
 
     {"query_graph",
      "Execute a Cypher query against the knowledge graph for complex multi-hop patterns, "
@@ -364,8 +366,9 @@ static const tool_def_t TOOLS[] = {
      "{\"type\":\"object\",\"properties\":{\"function_name\":{\"type\":\"string\"},\"project\":{"
      "\"type\":\"string\"},\"direction\":{\"type\":\"string\",\"enum\":[\"inbound\",\"outbound\","
      "\"both\"],\"default\":\"both\"},\"depth\":{\"type\":\"integer\",\"default\":3},\"edge_"
-     "types\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"function_"
-     "name\",\"project\"]}"},
+     "types\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"ranked\":{\"type\":\"boolean\","
+     "\"default\":true,\"description\":\"Sort callers/callees by PageRank importance.\"}},"
+     "\"required\":[\"function_name\",\"project\"]}"},
 
     {"get_code_snippet",
      "Read source code for a function/class/symbol. IMPORTANT: First call search_graph to find the "
@@ -396,6 +399,14 @@ static const tool_def_t TOOLS[] = {
      "detail level.\"},\"focus\":{\"type\":\"string\",\"description\":\"Optional domain keyword "
      "to zoom into (for example payment or inventory).\"}},\"anyOf\":[{\"required\":["
      "\"project\"]},{\"required\":[\"project_path\"]}]}"},
+
+    {"get_key_symbols",
+     "Human-readable ranked symbol list: top functions/classes by PageRank importance. Use this "
+     "for fast first-session orientation and central entry-point discovery.",
+     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"limit\":{\"type\":"
+     "\"integer\",\"default\":20},\"focus\":{\"type\":\"string\",\"description\":\"Optional "
+     "keyword to narrow symbols by name, qualified name, or file path.\"}},\"required\":["
+     "\"project\"]}"},
 
     {"search_code",
      "Graph-augmented code search. Finds text patterns via grep, then enriches results with "
@@ -603,6 +614,21 @@ bool cbm_mcp_get_bool_arg(const char *args_json, const char *key) {
     yyjson_val *root = yyjson_doc_get_root(doc);
     yyjson_val *val = yyjson_obj_get(root, key);
     bool result = false;
+    if (val && yyjson_is_bool(val)) {
+        result = yyjson_get_bool(val);
+    }
+    yyjson_doc_free(doc);
+    return result;
+}
+
+static bool cbm_mcp_get_bool_arg_default(const char *args_json, const char *key, bool default_val) {
+    yyjson_doc *doc = yyjson_read(args_json, strlen(args_json), 0);
+    if (!doc) {
+        return default_val;
+    }
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *val = yyjson_obj_get(root, key);
+    bool result = default_val;
     if (val && yyjson_is_bool(val)) {
         result = yyjson_get_bool(val);
     }
@@ -1060,6 +1086,7 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
     int offset = cbm_mcp_get_int_arg(args, "offset", 0);
     int min_degree = cbm_mcp_get_int_arg(args, "min_degree", -1);
     int max_degree = cbm_mcp_get_int_arg(args, "max_degree", -1);
+    bool ranked = cbm_mcp_get_bool_arg_default(args, "ranked", true);
 
     cbm_search_params_t params = {
         .project = project,
@@ -1070,6 +1097,7 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
         .offset = offset,
         .min_degree = min_degree,
         .max_degree = max_degree,
+        .sort_by = ranked ? "relevance" : "name",
     };
 
     cbm_search_output_t out = {0};
@@ -1093,6 +1121,7 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
                                sr->node.file_path ? sr->node.file_path : "");
         yyjson_mut_obj_add_int(doc, item, "in_degree", sr->in_degree);
         yyjson_mut_obj_add_int(doc, item, "out_degree", sr->out_degree);
+        yyjson_mut_obj_add_real(doc, item, "pagerank", sr->pagerank);
         yyjson_mut_arr_add_val(results, item);
     }
     yyjson_mut_obj_add_val(doc, root, "results", results);
@@ -1332,6 +1361,82 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
     char *result = cbm_mcp_text_result(json, false);
     free(json);
     return result;
+}
+
+static char *handle_get_key_symbols(cbm_mcp_server_t *srv, const char *args) {
+    char *project = cbm_mcp_get_string_arg(args, "project");
+    char *focus = cbm_mcp_get_string_arg(args, "focus");
+    int limit = cbm_mcp_get_int_arg(args, "limit", 20);
+    cbm_store_t *store = resolve_store(srv, project);
+    REQUIRE_STORE(store, project);
+
+    char *not_indexed = verify_project_indexed(store, project);
+    if (not_indexed) {
+        free(project);
+        free(focus);
+        return not_indexed;
+    }
+
+    cbm_key_symbol_t *symbols = NULL;
+    int count = 0;
+    if (cbm_store_get_key_symbols(store, project, focus, limit, &symbols, &count) !=
+        CBM_STORE_OK) {
+        free(project);
+        free(focus);
+        return cbm_mcp_text_result("failed to load key symbols", true);
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_obj_add_str(doc, root, "project", project ? project : "");
+    yyjson_mut_obj_add_int(doc, root, "count", count);
+    yyjson_mut_val *results = yyjson_mut_arr(doc);
+    for (int i = 0; i < count; i++) {
+        yyjson_mut_val *item = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, item, "name", symbols[i].name ? symbols[i].name : "");
+        yyjson_mut_obj_add_str(doc, item, "qualified_name",
+                               symbols[i].qualified_name ? symbols[i].qualified_name : "");
+        yyjson_mut_obj_add_str(doc, item, "label", symbols[i].label ? symbols[i].label : "");
+        yyjson_mut_obj_add_str(doc, item, "file_path",
+                               symbols[i].file_path ? symbols[i].file_path : "");
+        yyjson_mut_obj_add_int(doc, item, "in_degree", symbols[i].in_degree);
+        yyjson_mut_obj_add_int(doc, item, "out_degree", symbols[i].out_degree);
+        yyjson_mut_obj_add_real(doc, item, "pagerank", symbols[i].pagerank);
+        yyjson_mut_arr_add_val(results, item);
+    }
+    yyjson_mut_obj_add_val(doc, root, "results", results);
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+    cbm_store_key_symbols_free(symbols, count);
+    free(project);
+    free(focus);
+
+    {
+        char *result = cbm_mcp_text_result(json, false);
+        free(json);
+        return result;
+    }
+}
+
+static int node_hop_rank_cmp(const void *lhs, const void *rhs) {
+    const cbm_node_hop_t *a = lhs;
+    const cbm_node_hop_t *b = rhs;
+    if (a->pagerank < b->pagerank) {
+        return 1;
+    }
+    if (a->pagerank > b->pagerank) {
+        return -1;
+    }
+    if (a->hop != b->hop) {
+        return a->hop - b->hop;
+    }
+    if (!a->node.name || !b->node.name) {
+        return 0;
+    }
+    return strcmp(a->node.name, b->node.name);
 }
 
 static bool same_project_path(const char *lhs, const char *rhs) {
@@ -1579,6 +1684,7 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     cbm_store_t *store = resolve_store(srv, project);
     char *direction = cbm_mcp_get_string_arg(args, "direction");
     int depth = cbm_mcp_get_int_arg(args, "depth", 3);
+    bool ranked = cbm_mcp_get_bool_arg_default(args, "ranked", true);
 
     if (!func_name) {
         free(project);
@@ -1644,6 +1750,10 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     if (do_outbound) {
         cbm_store_bfs(store, nodes[0].id, "outbound", edge_types, edge_type_count, depth, 100,
                       &tr_out);
+        if (ranked && tr_out.visited_count > 1) {
+            qsort(tr_out.visited, (size_t)tr_out.visited_count, sizeof(cbm_node_hop_t),
+                  node_hop_rank_cmp);
+        }
 
         yyjson_mut_val *callees = yyjson_mut_arr(doc);
         for (int i = 0; i < tr_out.visited_count; i++) {
@@ -1654,6 +1764,7 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
                 doc, item, "qualified_name",
                 tr_out.visited[i].node.qualified_name ? tr_out.visited[i].node.qualified_name : "");
             yyjson_mut_obj_add_int(doc, item, "hop", tr_out.visited[i].hop);
+            yyjson_mut_obj_add_real(doc, item, "pagerank", tr_out.visited[i].pagerank);
             yyjson_mut_arr_add_val(callees, item);
         }
         yyjson_mut_obj_add_val(doc, root, "callees", callees);
@@ -1662,6 +1773,10 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     if (do_inbound) {
         cbm_store_bfs(store, nodes[0].id, "inbound", edge_types, edge_type_count, depth, 100,
                       &tr_in);
+        if (ranked && tr_in.visited_count > 1) {
+            qsort(tr_in.visited, (size_t)tr_in.visited_count, sizeof(cbm_node_hop_t),
+                  node_hop_rank_cmp);
+        }
 
         yyjson_mut_val *callers = yyjson_mut_arr(doc);
         for (int i = 0; i < tr_in.visited_count; i++) {
@@ -1672,6 +1787,7 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
                 doc, item, "qualified_name",
                 tr_in.visited[i].node.qualified_name ? tr_in.visited[i].node.qualified_name : "");
             yyjson_mut_obj_add_int(doc, item, "hop", tr_in.visited[i].hop);
+            yyjson_mut_obj_add_real(doc, item, "pagerank", tr_in.visited[i].pagerank);
             yyjson_mut_arr_add_val(callers, item);
         }
         yyjson_mut_obj_add_val(doc, root, "callers", callers);
@@ -3056,6 +3172,9 @@ char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const ch
     }
     if (strcmp(tool_name, "get_architecture") == 0) {
         return handle_get_architecture(srv, args_json);
+    }
+    if (strcmp(tool_name, "get_key_symbols") == 0) {
+        return handle_get_key_symbols(srv, args_json);
     }
     if (strcmp(tool_name, "get_architecture_summary") == 0) {
         return handle_get_architecture_summary(srv, args_json);
