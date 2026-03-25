@@ -142,6 +142,9 @@ TEST(mcp_tools_list) {
     ASSERT_NOT_NULL(strstr(json, "get_key_symbols"));
     ASSERT_NOT_NULL(strstr(json, "get_impact_analysis"));
     ASSERT_NOT_NULL(strstr(json, "get_architecture_summary"));
+    ASSERT_NOT_NULL(strstr(json, "explore"));
+    ASSERT_NOT_NULL(strstr(json, "understand"));
+    ASSERT_NOT_NULL(strstr(json, "prepare_change"));
     ASSERT_NOT_NULL(strstr(json, "search_code"));
     ASSERT_NOT_NULL(strstr(json, "list_projects"));
     ASSERT_NOT_NULL(strstr(json, "delete_project"));
@@ -307,6 +310,9 @@ TEST(server_handle_tools_list) {
     ASSERT_NOT_NULL(strstr(resp, "\"id\":2"));
     ASSERT_NOT_NULL(strstr(resp, "search_graph"));
     ASSERT_NOT_NULL(strstr(resp, "query_graph"));
+    ASSERT_NOT_NULL(strstr(resp, "explore"));
+    ASSERT_NOT_NULL(strstr(resp, "understand"));
+    ASSERT_NOT_NULL(strstr(resp, "prepare_change"));
     free(resp);
 
     cbm_mcp_server_free(srv);
@@ -1344,6 +1350,16 @@ static cbm_mcp_server_t *setup_snippet_server(char *tmp_dir, size_t tmp_sz) {
     n_run2.end_line = 13;
     cbm_store_upsert_node(st, &n_run2);
 
+    cbm_node_t n_run3 = {0};
+    n_run3.project = proj_name;
+    n_run3.label = "Function";
+    n_run3.name = "Run";
+    n_run3.qualified_name = "test-project.api.server.Run";
+    n_run3.file_path = "main.go";
+    n_run3.start_line = 11;
+    n_run3.end_line = 13;
+    cbm_store_upsert_node(st, &n_run3);
+
     /* Create edges: HandleRequest -> ProcessOrder, HandleRequest -> Run1 */
     cbm_edge_t e1 = {.project = proj_name, .source_id = id_hr, .target_id = id_po, .type = "CALLS"};
     cbm_store_insert_edge(st, &e1);
@@ -1352,6 +1368,11 @@ static cbm_mcp_server_t *setup_snippet_server(char *tmp_dir, size_t tmp_sz) {
         .project = proj_name, .source_id = id_hr, .target_id = id_run1, .type = "CALLS"};
     cbm_store_insert_edge(st, &e2);
     (void)id_run1; /* run1 used for edge above */
+
+    if (cbm_store_compute_pagerank(st, proj_name, 20, 0.85) != CBM_STORE_OK) {
+        cbm_mcp_server_free(srv);
+        return NULL;
+    }
 
     return srv;
 }
@@ -1680,6 +1701,291 @@ TEST(tool_get_impact_analysis_route_and_entry_point_typing) {
     ASSERT_NOT_NULL(
         strstr(text, "\"name\":\"POST /orders\",\"file\":\"routes/api.php\",\"type\":\"route\""));
     free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_explore_basic) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "explore",
+                                    "{\"project\":\"impact\",\"area\":\"Order\"}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"matches\""));
+    ASSERT_NOT_NULL(strstr(text, "\"dependencies\""));
+    ASSERT_NOT_NULL(strstr(text, "\"hotspots\""));
+    ASSERT_NOT_NULL(strstr(text, "\"entry_points\""));
+    ASSERT_NOT_NULL(strstr(text, "ProcessOrder"));
+    ASSERT_NOT_NULL(strstr(text, "CliEntry"));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_explore_max_tokens_truncates) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "explore",
+                                    "{\"project\":\"impact\",\"area\":\"Order\",\"max_tokens\":1}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"truncated\":true"));
+    ASSERT_NOT_NULL(strstr(text, "\"total_results\""));
+    ASSERT_NOT_NULL(strstr(text, "\"shown\""));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_understand_exact_short_name_autopicks_best_non_test) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw =
+        cbm_mcp_handle_tool(srv, "understand", "{\"project\":\"impact\",\"symbol\":\"Duplicate\"}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"qualified_name\":\"impact.core.Duplicate\""));
+    ASSERT_NOT_NULL(strstr(text, "\"alternatives\""));
+    ASSERT_NOT_NULL(strstr(text, "impact.tests.Duplicate"));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_understand_qualified_name_resolution) {
+    char tmp[256];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(
+        srv, "understand",
+        "{\"project\":\"test-project\",\"symbol\":\"test-project.cmd.server.main.ProcessOrder\"}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(
+        strstr(text, "\"qualified_name\":\"test-project.cmd.server.main.ProcessOrder\""));
+    ASSERT_NOT_NULL(strstr(text, "\"definition\""));
+    ASSERT_NOT_NULL(strstr(text, "\"source\""));
+    ASSERT_NOT_NULL(strstr(text, "func ProcessOrder(id int)"));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    cleanup_snippet_dir(tmp);
+    PASS();
+}
+
+TEST(tool_understand_suffix_ambiguity_returns_suggestions) {
+    char tmp[256];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    char *raw =
+        cbm_mcp_handle_tool(srv, "understand", "{\"project\":\"test-project\",\"symbol\":\"server.Run\"}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"status\":\"ambiguous\""));
+    ASSERT_NOT_NULL(strstr(text, "test-project.cmd.server.Run"));
+    ASSERT_NOT_NULL(strstr(text, "test-project.api.server.Run"));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    cleanup_snippet_dir(tmp);
+    PASS();
+}
+
+TEST(tool_understand_max_tokens_truncates) {
+    char tmp[256];
+    cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(
+        srv, "understand",
+        "{\"project\":\"test-project\",\"symbol\":\"test-project.cmd.server.main.HandleRequest\","
+        "\"max_tokens\":1}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"truncated\":true"));
+    ASSERT_NOT_NULL(strstr(text, "\"definition\""));
+    ASSERT_NOT_NULL(strstr(text, "\"shown\""));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    cleanup_snippet_dir(tmp);
+    PASS();
+}
+
+TEST(tool_prepare_change_basic) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(
+        srv, "prepare_change", "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"review_scope\""));
+    ASSERT_NOT_NULL(strstr(text, "\"risk_score\":\"high\""));
+    ASSERT_NOT_NULL(strstr(text, "\"must_review\""));
+    ASSERT_NOT_NULL(strstr(text, "app/services/order_service.php"));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_prepare_change_include_tests_false) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(
+        srv, "prepare_change",
+        "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\",\"include_tests\":false}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"affected_tests\":[]"));
+    ASSERT_NOT_NULL(strstr(text, "\"summary\":\"2 direct callers, 2 route/entry points, 1 transitive impacts\""));
+    ASSERT_NULL(strstr(text, "\"review_scope\":{\"must_review\":[\"app/services/order_service.php\"],\"should_review\":[\"app/ui/browser_flow.php\"],\"tests\""));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_prepare_change_max_tokens_truncates) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(
+        srv, "prepare_change",
+        "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\",\"max_tokens\":1}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"truncated\":true"));
+    ASSERT_NOT_NULL(strstr(text, "\"review_scope\""));
+    ASSERT_NOT_NULL(strstr(text, "\"shown\""));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+/* ── Error-path tests for compound tools ──────────────────────── */
+
+TEST(tool_explore_missing_project) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "explore",
+                                    "{\"project\":\"nonexistent\",\"area\":\"foo\"}");
+    ASSERT_NOT_NULL(raw);
+    ASSERT_NOT_NULL(strstr(raw, "isError"));
+    ASSERT_NOT_NULL(strstr(raw, "not found"));
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_explore_no_matches) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "explore",
+                                    "{\"project\":\"impact\",\"area\":\"zzzznonexistent\"}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    /* Should return valid JSON with empty arrays, not an error */
+    ASSERT_NOT_NULL(strstr(text, "\"matches\""));
+    ASSERT_NOT_NULL(strstr(text, "\"hotspots\""));
+    ASSERT_NULL(strstr(text, "isError"));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_understand_missing_project) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "understand",
+                                    "{\"project\":\"nonexistent\",\"symbol\":\"Foo\"}");
+    ASSERT_NOT_NULL(raw);
+    ASSERT_NOT_NULL(strstr(raw, "isError"));
+    ASSERT_NOT_NULL(strstr(raw, "not found"));
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_understand_missing_symbol) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "understand",
+                                    "{\"project\":\"impact\",\"symbol\":\"ZZZNoSuchSymbol\"}");
+    ASSERT_NOT_NULL(raw);
+    ASSERT_NOT_NULL(strstr(raw, "isError"));
+    ASSERT_NOT_NULL(strstr(raw, "not found"));
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_prepare_change_missing_project) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "prepare_change",
+                                    "{\"project\":\"nonexistent\",\"symbol\":\"Foo\"}");
+    ASSERT_NOT_NULL(raw);
+    ASSERT_NOT_NULL(strstr(raw, "isError"));
+    ASSERT_NOT_NULL(strstr(raw, "not found"));
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_prepare_change_missing_symbol) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "prepare_change",
+                                    "{\"project\":\"impact\",\"symbol\":\"ZZZNoSuchSymbol\"}");
+    ASSERT_NOT_NULL(raw);
+    ASSERT_NOT_NULL(strstr(raw, "isError"));
+    ASSERT_NOT_NULL(strstr(raw, "not found"));
     free(raw);
 
     cbm_mcp_server_free(srv);
@@ -2426,6 +2732,21 @@ SUITE(mcp) {
     RUN_TEST(tool_get_impact_analysis_include_tests_false);
     RUN_TEST(tool_get_impact_analysis_max_tokens_truncates);
     RUN_TEST(tool_get_impact_analysis_route_and_entry_point_typing);
+    RUN_TEST(tool_explore_basic);
+    RUN_TEST(tool_explore_max_tokens_truncates);
+    RUN_TEST(tool_understand_exact_short_name_autopicks_best_non_test);
+    RUN_TEST(tool_understand_qualified_name_resolution);
+    RUN_TEST(tool_understand_suffix_ambiguity_returns_suggestions);
+    RUN_TEST(tool_understand_max_tokens_truncates);
+    RUN_TEST(tool_prepare_change_basic);
+    RUN_TEST(tool_prepare_change_include_tests_false);
+    RUN_TEST(tool_prepare_change_max_tokens_truncates);
+    RUN_TEST(tool_explore_missing_project);
+    RUN_TEST(tool_explore_no_matches);
+    RUN_TEST(tool_understand_missing_project);
+    RUN_TEST(tool_understand_missing_symbol);
+    RUN_TEST(tool_prepare_change_missing_project);
+    RUN_TEST(tool_prepare_change_missing_symbol);
 
     /* Pipeline-dependent tool handlers */
     RUN_TEST(tool_index_repository_missing_path);
