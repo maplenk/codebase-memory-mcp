@@ -2453,6 +2453,15 @@ int cbm_store_search(cbm_store_t *s, const cbm_search_params_t *params, cbm_sear
         ADD_WHERE(bind_buf);
         BIND_TEXT(params->name_pattern);
     }
+    if (params->qn_pattern) {
+        if (params->case_sensitive) {
+            snprintf(bind_buf, sizeof(bind_buf), "n.qualified_name REGEXP ?%d", bind_idx + 1);
+        } else {
+            snprintf(bind_buf, sizeof(bind_buf), "iregexp(?%d, n.qualified_name)", bind_idx + 1);
+        }
+        ADD_WHERE(bind_buf);
+        BIND_TEXT(params->qn_pattern);
+    }
     if (params->file_pattern) {
         like_pattern = cbm_glob_to_like(params->file_pattern);
         snprintf(bind_buf, sizeof(bind_buf), "n.file_path LIKE ?%d", bind_idx + 1);
@@ -5344,7 +5353,7 @@ static int summary_count_nodes(cbm_store_t *s, const char *project, const char *
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(s->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         store_set_error_sqlite(s, "summary_count_nodes");
-        return 0;
+        return 0; /* return 0 rather than -1 so callers display "0" not "-1" */
     }
     bind_text(stmt, 1, project);
     if (focus_like && focus_like[0]) {
