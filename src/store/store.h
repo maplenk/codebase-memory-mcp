@@ -116,7 +116,7 @@ typedef struct {
     int offset;
     bool exclude_entry_points;
     bool include_connected;
-    const char *sort_by; /* "relevance" / "name" / "degree", NULL = relevance */
+    const char *sort_by; /* "relevance" / "name" / "degree", NULL = name */
     bool case_sensitive;
     const char **exclude_labels; /* NULL-terminated array, or NULL */
 } cbm_search_params_t;
@@ -125,6 +125,7 @@ typedef struct {
     cbm_node_t node;
     int in_degree;
     int out_degree;
+    double pagerank;
     /* connected_names: allocated array of strings, count in connected_count */
     const char **connected_names;
     int connected_count;
@@ -141,6 +142,7 @@ typedef struct {
 typedef struct {
     cbm_node_t node;
     int hop; /* BFS depth from root */
+    double pagerank;
 } cbm_node_hop_t;
 
 typedef struct {
@@ -359,6 +361,25 @@ int cbm_store_get_file_hashes(cbm_store_t *s, const char *project, cbm_file_hash
 int cbm_store_delete_file_hash(cbm_store_t *s, const char *project, const char *rel_path);
 
 int cbm_store_delete_file_hashes(cbm_store_t *s, const char *project);
+
+/* ── PageRank ───────────────────────────────────────────────────── */
+
+int cbm_store_compute_pagerank(cbm_store_t *s, const char *project, int iterations, double damping);
+
+typedef struct {
+    const char *name;
+    const char *qualified_name;
+    const char *label;
+    const char *file_path;
+    int in_degree;
+    int out_degree;
+    double pagerank;
+} cbm_key_symbol_t;
+
+int cbm_store_get_key_symbols(cbm_store_t *s, const char *project, const char *focus, int limit,
+                              cbm_key_symbol_t **out, int *count);
+
+void cbm_store_key_symbols_free(cbm_key_symbol_t *symbols, int count);
 
 /* ── Search ─────────────────────────────────────────────────────── */
 

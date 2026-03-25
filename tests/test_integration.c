@@ -381,6 +381,18 @@ TEST(integ_mcp_get_architecture_summary) {
     PASS();
 }
 
+TEST(integ_mcp_get_key_symbols) {
+    char args[256];
+    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"limit\":5}", g_project);
+
+    char *resp = call_tool("get_key_symbols", args);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "pagerank"));
+    ASSERT_TRUE(strstr(resp, "Add") || strstr(resp, "greet") || strstr(resp, "Multiply"));
+    free(resp);
+    PASS();
+}
+
 TEST(integ_mcp_trace_call_path) {
     /* Trace outbound calls from Compute → should reach Add and Multiply */
     char args[256];
@@ -539,6 +551,21 @@ TEST(integ_store_bfs_traversal) {
     PASS();
 }
 
+TEST(integ_store_key_symbols_ranked) {
+    cbm_store_t *store = cbm_store_open_path(g_dbpath);
+    ASSERT_NOT_NULL(store);
+
+    cbm_key_symbol_t *symbols = NULL;
+    int count = 0;
+    ASSERT_EQ(cbm_store_get_key_symbols(store, g_project, NULL, 5, &symbols, &count), CBM_STORE_OK);
+    ASSERT_GT(count, 0);
+    ASSERT_TRUE(symbols[0].pagerank > 0.0);
+
+    cbm_store_key_symbols_free(symbols, count);
+    cbm_store_close(store);
+    PASS();
+}
+
 /* ══════════════════════════════════════════════════════════════════
  *  SUITE
  * ══════════════════════════════════════════════════════════════════ */
@@ -548,7 +575,7 @@ SUITE(integration) {
     if (integration_setup() != 0) {
         printf("  %-50s", "integration_setup");
         printf("SKIP (setup failed)\n");
-        tf_skip_count += 16; /* skip all integration tests */
+        tf_skip_count += 25; /* skip all integration tests */
         integration_teardown();
         return;
     }
@@ -569,6 +596,7 @@ SUITE(integration) {
     RUN_TEST(integ_mcp_get_graph_schema);
     RUN_TEST(integ_mcp_get_architecture);
     RUN_TEST(integ_mcp_get_architecture_summary);
+    RUN_TEST(integ_mcp_get_key_symbols);
     RUN_TEST(integ_mcp_trace_call_path);
     RUN_TEST(integ_mcp_index_status);
 
@@ -576,6 +604,7 @@ SUITE(integration) {
     RUN_TEST(integ_store_search_by_degree);
     RUN_TEST(integ_store_find_by_file);
     RUN_TEST(integ_store_bfs_traversal);
+    RUN_TEST(integ_store_key_symbols_ranked);
 
     /* Pipeline API tests (no db needed) */
     RUN_TEST(integ_pipeline_fqn_compute);
