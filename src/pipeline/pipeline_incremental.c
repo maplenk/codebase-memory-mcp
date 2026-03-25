@@ -197,15 +197,13 @@ int cbm_pipeline_run_incremental(cbm_pipeline_t *p, const char *db_path, cbm_fil
         cbm_log_info("incremental.noop", "reason", "no_changes");
         cbm_clock_gettime(CLOCK_MONOTONIC, &t);
         if (cbm_store_compute_pagerank(store, project, 20, 0.85) != CBM_STORE_OK) {
-            cbm_log_error("incremental.err", "msg", "pagerank_failed", "project", project, "error",
-                          cbm_store_error(store));
-            free(is_changed);
-            free(deleted);
-            cbm_store_free_file_hashes(stored, stored_count);
-            cbm_store_close(store);
-            return -1;
+            /* Preserve the successful no-op index result even if ranking refresh fails. */
+            cbm_log_warn("incremental.warn", "msg", "pagerank_failed", "project", project,
+                         "error", cbm_store_error(store));
+        } else {
+            cbm_log_info("pass.timing", "pass", "incr_pagerank", "elapsed_ms",
+                         itoa_buf((int)elapsed_ms(t)));
         }
-        cbm_log_info("pass.timing", "pass", "incr_pagerank", "elapsed_ms", itoa_buf((int)elapsed_ms(t)));
         free(is_changed);
         free(deleted);
         cbm_store_free_file_hashes(stored, stored_count);
@@ -300,15 +298,12 @@ int cbm_pipeline_run_incremental(cbm_pipeline_t *p, const char *db_path, cbm_fil
 
     cbm_clock_gettime(CLOCK_MONOTONIC, &t);
     if (cbm_store_compute_pagerank(store, project, 20, 0.85) != CBM_STORE_OK) {
-        cbm_log_error("incremental.err", "msg", "pagerank_failed", "project", project, "error",
-                      cbm_store_error(store));
-        cbm_gbuf_free(gbuf);
-        cbm_registry_free(registry);
-        free(changed_files);
-        cbm_store_close(store);
-        return -1;
+        cbm_log_warn("incremental.warn", "msg", "pagerank_failed", "project", project, "error",
+                     cbm_store_error(store));
+    } else {
+        cbm_log_info("pass.timing", "pass", "incr_pagerank", "elapsed_ms",
+                     itoa_buf((int)elapsed_ms(t)));
     }
-    cbm_log_info("pass.timing", "pass", "incr_pagerank", "elapsed_ms", itoa_buf((int)elapsed_ms(t)));
 
     /* Cleanup */
     cbm_gbuf_free(gbuf);
