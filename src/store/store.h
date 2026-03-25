@@ -429,6 +429,40 @@ cbm_impact_summary_t cbm_build_impact_summary(const cbm_node_hop_t *hops, int ho
 int cbm_deduplicate_hops(const cbm_node_hop_t *hops, int hop_count, cbm_node_hop_t **out,
                          int *out_count);
 
+typedef struct {
+    const char *name;
+    const char *file;
+    const char *type;
+    double pagerank;
+    int hop; /* internal traversal depth used for ordering/grouping */
+} cbm_impact_item_t;
+
+typedef struct {
+    const char *name;
+    const char *file;
+} cbm_affected_test_t;
+
+typedef struct {
+    const char *symbol;
+    const char *qualified_name;
+    const char *file;
+    double pagerank;
+    cbm_impact_item_t *direct;
+    int direct_count;
+    cbm_impact_item_t *indirect;
+    int indirect_count;
+    cbm_impact_item_t *transitive;
+    int transitive_count;
+    cbm_affected_test_t *affected_tests;
+    int affected_test_count;
+    const char *risk_score;
+    const char *summary;
+} cbm_impact_analysis_t;
+
+int cbm_store_get_impact_analysis(cbm_store_t *s, const char *project, const char *symbol,
+                                  int depth, cbm_impact_analysis_t *out);
+void cbm_store_impact_analysis_free(cbm_impact_analysis_t *out);
+
 /* ── Schema ─────────────────────────────────────────────────────── */
 
 int cbm_store_get_schema(cbm_store_t *s, const char *project, cbm_schema_info_t *out);
