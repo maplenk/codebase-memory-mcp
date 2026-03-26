@@ -8,7 +8,9 @@
 // operations
 
 #include "mcp/mcp.h"
+#include "mcp/session.h"
 #include "store/store.h"
+#include "foundation/hash_table.h"
 #include "cypher/cypher.h"
 #include "pipeline/pipeline.h"
 #include "cli/cli.h"
@@ -871,6 +873,16 @@ static const tool_def_t TOOLS[] = {
      "{\"type\":\"object\",\"properties\":{\"traces\":{\"type\":\"array\",\"items\":{\"type\":"
      "\"object\"}},\"project\":{\"type\":"
      "\"string\"}},\"required\":[\"traces\",\"project\"]}"},
+
+    {"get_session_context",
+     "Get session memory: files read/edited, symbols queried, areas explored, "
+     "and related symbols not yet examined, ranked by PageRank.",
+     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\","
+     "\"description\":\"Project name (needed for related_untouched computation).\"},"
+     "\"include_related\":{\"type\":\"boolean\",\"default\":true,"
+     "\"description\":\"Include graph neighbors of touched symbols that have not been "
+     "examined yet.\"},\"limit\":{\"type\":\"integer\",\"default\":10,"
+     "\"description\":\"Max related_untouched items.\"}},\"required\":[]}"},
 };
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
@@ -1078,6 +1090,9 @@ struct cbm_mcp_server {
     struct cbm_config *config;   /* external config ref (not owned) */
     cbm_thread_t autoindex_tid;
     bool autoindex_active; /* true if auto-index thread was started */
+
+    /* Ephemeral session memory (Phase 7A) — tracks files/symbols/areas touched */
+    cbm_session_state_t *session;
 };
 
 cbm_mcp_server_t *cbm_mcp_server_new(const char *store_path) {
@@ -1101,6 +1116,18 @@ cbm_mcp_server_t *cbm_mcp_server_new(const char *store_path) {
 
 cbm_store_t *cbm_mcp_server_store(cbm_mcp_server_t *srv) {
     return srv ? srv->store : NULL;
+}
+
+struct cbm_session_state *cbm_mcp_server_session(cbm_mcp_server_t *srv) {
+    return srv ? srv->session : NULL;
+}
+
+/* Lazily create session state on first use. */
+static cbm_session_state_t *ensure_session(cbm_mcp_server_t *srv) {
+    if (!srv->session) {
+        srv->session = cbm_session_create();
+    }
+    return srv->session;
 }
 
 void cbm_mcp_server_set_project(cbm_mcp_server_t *srv, const char *project) {
@@ -1136,6 +1163,7 @@ void cbm_mcp_server_free(cbm_mcp_server_t *srv) {
     if (srv->owns_store && srv->store) {
         cbm_store_close(srv->store);
     }
+    cbm_session_free(srv->session);
     free(srv->current_project);
     free(srv);
 }
@@ -1526,6 +1554,18 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
 
     cbm_search_output_t out = {0};
     cbm_store_search(store, &params, &out);
+
+    /* Session tracking: record top result names as queried symbols (cap 20) */
+    {
+        cbm_session_state_t *ss = ensure_session(srv);
+        cbm_session_bump_query_count(ss);
+        int track_limit = out.count < 20 ? out.count : 20;
+        for (int i = 0; i < track_limit; i++) {
+            if (out.results[i].node.name) {
+                cbm_session_track_symbol(ss, out.results[i].node.name);
+            }
+        }
+    }
 
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     yyjson_mut_val *root = yyjson_mut_obj(doc);
@@ -1961,6 +2001,13 @@ static char *handle_get_impact_analysis(cbm_mcp_server_t *srv, const char *args)
         return not_indexed;
     }
 
+    /* Session tracking */
+    {
+        cbm_session_state_t *ss = ensure_session(srv);
+        cbm_session_bump_query_count(ss);
+        cbm_session_track_impact(ss, symbol);
+    }
+
     cbm_impact_analysis_t impact = {0};
     int rc = cbm_store_get_impact_analysis(store, project, symbol, depth, &impact);
     if (rc == CBM_STORE_NOT_FOUND) {
@@ -2390,6 +2437,13 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         free(project);
         free(direction);
         return not_indexed;
+    }
+
+    /* Session tracking */
+    {
+        cbm_session_state_t *ss = ensure_session(srv);
+        cbm_session_bump_query_count(ss);
+        cbm_session_track_symbol(ss, func_name);
     }
 
     if (!direction) {
@@ -2998,10 +3052,16 @@ static char *handle_get_code_snippet(cbm_mcp_server_t *srv, const char *args) {
     /* Default to current project (same as all other tools) */
     const char *effective_project = project ? project : srv->current_project;
 
+    /* Session tracking: bump count on every call */
+    cbm_session_bump_query_count(ensure_session(srv));
+
     /* Tier 1: Exact QN match */
     cbm_node_t node = {0};
     int rc = cbm_store_find_node_by_qn(store, effective_project, qn, &node);
     if (rc == CBM_STORE_OK) {
+        if (node.file_path) {
+            cbm_session_track_file_read(ensure_session(srv), node.file_path);
+        }
         char *result = build_snippet_response(srv, &node, NULL, include_neighbors, NULL, 0);
         free_node_contents(&node);
         free(qn);
@@ -3018,6 +3078,9 @@ static char *handle_get_code_snippet(cbm_mcp_server_t *srv, const char *args) {
     if (suffix_count == 1) {
         copy_node(&suffix_nodes[0], &node);
         cbm_store_free_nodes(suffix_nodes, suffix_count);
+        if (node.file_path) {
+            cbm_session_track_file_read(ensure_session(srv), node.file_path);
+        }
         char *result = build_snippet_response(srv, &node, "suffix", include_neighbors, NULL, 0);
         free_node_contents(&node);
         free(qn);
@@ -3855,6 +3918,13 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
         return not_indexed;
     }
 
+    /* Session tracking */
+    {
+        cbm_session_state_t *ss = ensure_session(srv);
+        cbm_session_bump_query_count(ss);
+        cbm_session_track_area(ss, area);
+    }
+
     char *contains_regex = build_contains_regex_pattern(area);
     char *file_glob = build_contains_glob_pattern(area);
     cbm_search_output_t name_out = {0};
@@ -4098,6 +4168,13 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
         free(project);
         free(symbol);
         return not_indexed;
+    }
+
+    /* Session tracking */
+    {
+        cbm_session_state_t *ss = ensure_session(srv);
+        cbm_session_bump_query_count(ss);
+        cbm_session_track_symbol(ss, symbol);
     }
 
     cbm_search_output_t qn_out = {0};
@@ -4451,6 +4528,13 @@ static char *handle_prepare_change(cbm_mcp_server_t *srv, const char *args) {
         free(project);
         free(symbol);
         return not_indexed;
+    }
+
+    /* Session tracking */
+    {
+        cbm_session_state_t *ss = ensure_session(srv);
+        cbm_session_bump_query_count(ss);
+        cbm_session_track_impact(ss, symbol);
     }
 
     cbm_impact_analysis_t impact = {0};
@@ -5350,6 +5434,10 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
     /* resolve_store already called via get_project_root above */
     cbm_store_t *store = srv->store;
 
+    /* Session tracking: bump count once for the detect_changes call */
+    cbm_session_state_t *dc_session = ensure_session(srv);
+    cbm_session_bump_query_count(dc_session);
+
     char line[1024];
     int file_count = 0;
 
@@ -5361,6 +5449,9 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
         if (len == 0) {
             continue;
         }
+
+        /* Session tracking: record each changed file */
+        cbm_session_track_file_edited(dc_session, line);
 
         yyjson_mut_arr_add_str(doc, changed, line);
         file_count++;
@@ -5532,6 +5623,193 @@ static char *handle_ingest_traces(cbm_mcp_server_t *srv, const char *args) {
     return result;
 }
 
+/* ── Session context (Phase 7A) ────────────────────────────────── */
+
+/* Callback: free a strdup'd hash table key (for temporary candidate sets). */
+static void free_ht_key_cb(const char *key, void *value, void *userdata) {
+    (void)value;
+    (void)userdata;
+    free((void *)key);
+}
+
+/* Callback: append key to a yyjson array. */
+typedef struct {
+    yyjson_mut_doc *doc;
+    yyjson_mut_val *arr;
+} json_arr_ctx_t;
+
+static void append_key_to_json_arr(const char *key, void *userdata) {
+    json_arr_ctx_t *ctx = (json_arr_ctx_t *)userdata;
+    yyjson_mut_arr_add_strcpy(ctx->doc, ctx->arr, key);
+}
+
+/* Callback: collect symbol names into a list for related_untouched lookup. */
+typedef struct {
+    const char **names;
+    int count;
+    int cap;
+} name_collector_t;
+
+static void collect_symbol_name(const char *key, void *userdata) {
+    name_collector_t *nc = (name_collector_t *)userdata;
+    if (nc->count < nc->cap) {
+        nc->names[nc->count++] = key;
+    }
+}
+
+static char *handle_get_session_context(cbm_mcp_server_t *srv, const char *args) {
+    char *project = cbm_mcp_get_string_arg(args, "project");
+    bool include_related = cbm_mcp_get_bool_arg_default(args, "include_related", true);
+    int limit = cbm_mcp_get_int_arg(args, "limit", 10);
+
+    cbm_session_state_t *ss = ensure_session(srv);
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    /* Basic session stats */
+    time_t start = cbm_session_start_time(ss);
+    time_t now = time(NULL);
+    yyjson_mut_obj_add_int(doc, root, "session_duration_s", (int64_t)(now - start));
+    yyjson_mut_obj_add_int(doc, root, "query_count", cbm_session_query_count(ss));
+
+    /* Build set arrays using iteration */
+    json_arr_ctx_t jctx;
+    jctx.doc = doc;
+
+#define EMIT_SET_ARRAY(field_name, foreach_fn)        \
+    do {                                              \
+        jctx.arr = yyjson_mut_arr(doc);               \
+        foreach_fn(ss, append_key_to_json_arr, &jctx); \
+        yyjson_mut_obj_add_val(doc, root, field_name, jctx.arr); \
+    } while (0)
+
+    EMIT_SET_ARRAY("files_read", cbm_session_foreach_file_read);
+    EMIT_SET_ARRAY("files_edited", cbm_session_foreach_file_edited);
+    EMIT_SET_ARRAY("symbols_queried", cbm_session_foreach_symbol);
+    EMIT_SET_ARRAY("areas_explored", cbm_session_foreach_area);
+    EMIT_SET_ARRAY("impact_analyses_run", cbm_session_foreach_impact);
+
+#undef EMIT_SET_ARRAY
+
+    /* related_untouched: graph neighbors of touched symbols not yet examined */
+    yyjson_mut_val *related = yyjson_mut_arr(doc);
+    if (include_related && project) {
+        cbm_store_t *store = resolve_store(srv, project);
+        if (store) {
+            /* Collect queried symbols + impact symbols (cap at 20 total) */
+            const int MAX_LOOKUP = 20;
+            const char *lookup_names[20];
+            name_collector_t nc = {.names = lookup_names, .count = 0, .cap = MAX_LOOKUP};
+            cbm_session_foreach_symbol(ss, collect_symbol_name, &nc);
+            cbm_session_foreach_impact(ss, collect_symbol_name, &nc);
+
+            /* Temporary dedup set for candidates */
+            CBMHashTable *candidates = cbm_ht_create(64);
+
+            /* For each tracked symbol, find 1-hop neighbors */
+            for (int i = 0; i < nc.count; i++) {
+                cbm_node_t *nodes = NULL;
+                int ncount = 0;
+                cbm_store_find_nodes_by_name(store, project, lookup_names[i], &nodes, &ncount);
+
+                for (int j = 0; j < ncount; j++) {
+                    char **callers = NULL;
+                    char **callees = NULL;
+                    int caller_count = 0, callee_count = 0;
+                    cbm_store_node_neighbor_names(store, nodes[j].id, 10, &callers, &caller_count,
+                                                  &callees, &callee_count);
+
+                    /* Add callers not already tracked */
+                    for (int k = 0; k < caller_count; k++) {
+                        if (callers[k] && !cbm_session_has_symbol(ss, callers[k]) &&
+                            !cbm_ht_has(candidates, callers[k])) {
+                            char *key = strdup(callers[k]);
+                            if (key) {
+                                /* Store the "reason" source symbol as the value */
+                                cbm_ht_set(candidates, key, (void *)lookup_names[i]);
+                            }
+                        }
+                    }
+                    /* Add callees not already tracked */
+                    for (int k = 0; k < callee_count; k++) {
+                        if (callees[k] && !cbm_session_has_symbol(ss, callees[k]) &&
+                            !cbm_ht_has(candidates, callees[k])) {
+                            char *key = strdup(callees[k]);
+                            if (key) {
+                                cbm_ht_set(candidates, key, (void *)lookup_names[i]);
+                            }
+                        }
+                    }
+
+                    /* Free neighbor arrays */
+                    for (int k = 0; k < caller_count; k++)
+                        free(callers[k]);
+                    free(callers);
+                    for (int k = 0; k < callee_count; k++)
+                        free(callees[k]);
+                    free(callees);
+                }
+                cbm_store_free_nodes(nodes, ncount);
+            }
+
+            /* Rank candidates by PageRank: get key symbols and match against candidates */
+            if (cbm_ht_count(candidates) > 0) {
+                cbm_key_symbol_t *key_syms = NULL;
+                int ks_count = 0;
+                cbm_store_get_key_symbols(store, project, NULL, 200, &key_syms, &ks_count);
+
+                int emitted = 0;
+                for (int i = 0; i < ks_count && emitted < limit; i++) {
+                    if (key_syms[i].name && cbm_ht_has(candidates, key_syms[i].name)) {
+                        const char *reason_sym =
+                            (const char *)cbm_ht_get(candidates, key_syms[i].name);
+                        yyjson_mut_val *item = yyjson_mut_obj(doc);
+                        /* Use strcpy variants: key_syms strings are freed below */
+                        yyjson_mut_obj_add_strcpy(doc, item, "name", key_syms[i].name);
+                        if (key_syms[i].file_path) {
+                            yyjson_mut_obj_add_strcpy(doc, item, "file", key_syms[i].file_path);
+                        }
+                        if (key_syms[i].pagerank > 0) {
+                            yyjson_mut_obj_add_real(doc, item, "pagerank", key_syms[i].pagerank);
+                        }
+                        /* Build reason string (stack buffer — must copy) */
+                        char reason[256];
+                        snprintf(reason, sizeof(reason), "neighbor of %s, not yet examined",
+                                 reason_sym ? reason_sym : "queried symbol");
+                        yyjson_mut_obj_add_strcpy(doc, item, "reason", reason);
+                        yyjson_mut_arr_add_val(related, item);
+                        emitted++;
+                    }
+                }
+
+                /* Free key symbols */
+                for (int i = 0; i < ks_count; i++) {
+                    free((void *)key_syms[i].name);
+                    free((void *)key_syms[i].qualified_name);
+                    free((void *)key_syms[i].label);
+                    free((void *)key_syms[i].file_path);
+                }
+                free(key_syms);
+            }
+
+            /* Free candidate keys */
+            cbm_ht_foreach(candidates, free_ht_key_cb, NULL);
+            cbm_ht_free(candidates);
+        }
+    }
+    yyjson_mut_obj_add_val(doc, root, "related_untouched", related);
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+    free(project);
+
+    char *result = cbm_mcp_text_result(json, false);
+    free(json);
+    return result;
+}
+
 /* ── Tool dispatch ────────────────────────────────────────────── */
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
@@ -5601,6 +5879,9 @@ char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const ch
     }
     if (strcmp(tool_name, "ingest_traces") == 0) {
         return handle_ingest_traces(srv, args_json);
+    }
+    if (strcmp(tool_name, "get_session_context") == 0) {
+        return handle_get_session_context(srv, args_json);
     }
 
     char msg[256];

@@ -6,6 +6,7 @@
 #include "../src/foundation/compat.h"
 #include "test_framework.h"
 #include <mcp/mcp.h>
+#include <mcp/session.h>
 #include <pipeline/pipeline.h>
 #include <store/store.h>
 #include <yyjson/yyjson.h>
@@ -2638,6 +2639,214 @@ TEST(mcp_server_run_rapid_messages) {
 #endif /* !_WIN32 */
 
 /* ══════════════════════════════════════════════════════════════════
+ *  SESSION MEMORY (Phase 7A)
+ * ══════════════════════════════════════════════════════════════════ */
+
+TEST(session_create_free) {
+    cbm_session_state_t *s = cbm_session_create();
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(cbm_session_query_count(s), 0);
+    ASSERT_EQ(cbm_session_files_read_count(s), 0);
+    ASSERT_EQ(cbm_session_files_edited_count(s), 0);
+    ASSERT_EQ(cbm_session_symbols_count(s), 0);
+    ASSERT_EQ(cbm_session_areas_count(s), 0);
+    ASSERT_EQ(cbm_session_impacts_count(s), 0);
+    ASSERT_TRUE(cbm_session_start_time(s) > 0);
+    cbm_session_free(s);
+    PASS();
+}
+
+TEST(session_track_dedup) {
+    cbm_session_state_t *s = cbm_session_create();
+    ASSERT_NOT_NULL(s);
+
+    /* Same path twice → count 1 */
+    cbm_session_track_file_read(s, "app/services/OrderService.php");
+    cbm_session_track_file_read(s, "app/services/OrderService.php");
+    ASSERT_EQ(cbm_session_files_read_count(s), 1);
+
+    /* Different path → count 2 */
+    cbm_session_track_file_read(s, "app/models/Order.php");
+    ASSERT_EQ(cbm_session_files_read_count(s), 2);
+
+    /* Check membership */
+    ASSERT_TRUE(cbm_session_has_file_read(s, "app/services/OrderService.php"));
+    ASSERT_TRUE(cbm_session_has_file_read(s, "app/models/Order.php"));
+    ASSERT_FALSE(cbm_session_has_file_read(s, "nonexistent.php"));
+
+    cbm_session_free(s);
+    PASS();
+}
+
+TEST(session_track_all_types) {
+    cbm_session_state_t *s = cbm_session_create();
+    ASSERT_NOT_NULL(s);
+
+    cbm_session_track_file_read(s, "file1.php");
+    cbm_session_track_file_edited(s, "file2.php");
+    cbm_session_track_symbol(s, "processOrder");
+    cbm_session_track_area(s, "payment");
+    cbm_session_track_impact(s, "calculateTax");
+    cbm_session_bump_query_count(s);
+    cbm_session_bump_query_count(s);
+
+    ASSERT_EQ(cbm_session_files_read_count(s), 1);
+    ASSERT_EQ(cbm_session_files_edited_count(s), 1);
+    ASSERT_EQ(cbm_session_symbols_count(s), 1);
+    ASSERT_EQ(cbm_session_areas_count(s), 1);
+    ASSERT_EQ(cbm_session_impacts_count(s), 1);
+    ASSERT_EQ(cbm_session_query_count(s), 2);
+
+    ASSERT_TRUE(cbm_session_has_file_edited(s, "file2.php"));
+    ASSERT_TRUE(cbm_session_has_symbol(s, "processOrder"));
+
+    cbm_session_free(s);
+    PASS();
+}
+
+TEST(session_null_safety) {
+    /* All functions should be safe with NULL session */
+    cbm_session_track_file_read(NULL, "x");
+    cbm_session_track_symbol(NULL, "x");
+    cbm_session_bump_query_count(NULL);
+    ASSERT_EQ(cbm_session_query_count(NULL), 0);
+    ASSERT_EQ(cbm_session_files_read_count(NULL), 0);
+    ASSERT_FALSE(cbm_session_has_symbol(NULL, "x"));
+    cbm_session_free(NULL);
+
+    /* NULL key should not crash */
+    cbm_session_state_t *s = cbm_session_create();
+    cbm_session_track_file_read(s, NULL);
+    cbm_session_track_symbol(s, NULL);
+    ASSERT_EQ(cbm_session_files_read_count(s), 0);
+    ASSERT_EQ(cbm_session_symbols_count(s), 0);
+    cbm_session_free(s);
+    PASS();
+}
+
+TEST(get_session_context_empty) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    char *raw = cbm_mcp_handle_tool(srv, "get_session_context", "{}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+
+    /* Should have query_count:0 (or 0 from the get_session_context call itself) */
+    ASSERT_NOT_NULL(strstr(text, "\"query_count\":"));
+    ASSERT_NOT_NULL(strstr(text, "\"files_read\":[]"));
+    ASSERT_NOT_NULL(strstr(text, "\"symbols_queried\":[]"));
+    ASSERT_NOT_NULL(strstr(text, "\"areas_explored\":[]"));
+    ASSERT_NOT_NULL(strstr(text, "\"related_untouched\":[]"));
+
+    free(text);
+    free(raw);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(get_session_context_after_tools) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    /* Call explore → should track area */
+    char *r1 = cbm_mcp_handle_tool(srv, "explore",
+                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    free(r1);
+
+    /* Call understand → should track symbol */
+    char *r2 = cbm_mcp_handle_tool(srv, "understand",
+                                   "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    free(r2);
+
+    /* Call get_session_context → verify accumulated state */
+    char *raw = cbm_mcp_handle_tool(srv, "get_session_context",
+                                    "{\"project\":\"impact\",\"include_related\":true}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+
+    /* Verify query count ≥ 2 (explore + understand) */
+    ASSERT_NOT_NULL(strstr(text, "\"query_count\":"));
+    /* "Order" should be in areas_explored */
+    ASSERT_NOT_NULL(strstr(text, "\"Order\""));
+    /* "ProcessOrder" should be in symbols_queried */
+    ASSERT_NOT_NULL(strstr(text, "\"ProcessOrder\""));
+    /* related_untouched should be present (may be empty if no neighbors outside touched set) */
+    ASSERT_NOT_NULL(strstr(text, "\"related_untouched\""));
+
+    free(text);
+    free(raw);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(get_session_context_no_project) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    /* Call a tool first to populate session */
+    char *r1 = cbm_mcp_handle_tool(srv, "understand",
+                                   "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    free(r1);
+
+    /* Call get_session_context without project → should return state but no related_untouched */
+    char *raw = cbm_mcp_handle_tool(srv, "get_session_context", "{}");
+    ASSERT_NOT_NULL(raw);
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+
+    ASSERT_NOT_NULL(strstr(text, "\"ProcessOrder\""));
+    /* related_untouched should be empty array (no project to query) */
+    ASSERT_NOT_NULL(strstr(text, "\"related_untouched\":[]"));
+
+    free(text);
+    free(raw);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(session_accumulates_across_tools) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    /* Call explore */
+    char *r1 = cbm_mcp_handle_tool(srv, "explore",
+                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    free(r1);
+
+    /* Call understand */
+    char *r2 = cbm_mcp_handle_tool(srv, "understand",
+                                   "{\"project\":\"impact\",\"symbol\":\"HandleOrder\"}");
+    free(r2);
+
+    /* Call get_impact_analysis */
+    char *r3 = cbm_mcp_handle_tool(srv, "get_impact_analysis",
+                                   "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    free(r3);
+
+    /* Verify session accumulated everything */
+    cbm_session_state_t *ss = cbm_mcp_server_session(srv);
+    ASSERT_NOT_NULL(ss);
+    ASSERT_TRUE(cbm_session_query_count(ss) >= 3);
+    ASSERT_TRUE(cbm_session_areas_count(ss) >= 1);
+    ASSERT_TRUE(cbm_session_symbols_count(ss) >= 1);  /* HandleOrder at minimum */
+    ASSERT_TRUE(cbm_session_impacts_count(ss) >= 1);  /* ProcessOrder */
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(get_session_context_tools_list_includes_tool) {
+    char *tools_json = cbm_mcp_tools_list();
+    ASSERT_NOT_NULL(tools_json);
+    ASSERT_NOT_NULL(strstr(tools_json, "get_session_context"));
+    free(tools_json);
+    PASS();
+}
+
+/* ══════════════════════════════════════════════════════════════════
  *  SUITE
  * ══════════════════════════════════════════════════════════════════ */
 
@@ -2798,4 +3007,15 @@ SUITE(mcp) {
     RUN_TEST(snippet_auto_resolve_enabled);
     RUN_TEST(snippet_include_neighbors_default);
     RUN_TEST(snippet_include_neighbors_enabled);
+
+    /* Session memory (Phase 7A) */
+    RUN_TEST(session_create_free);
+    RUN_TEST(session_track_dedup);
+    RUN_TEST(session_track_all_types);
+    RUN_TEST(session_null_safety);
+    RUN_TEST(get_session_context_empty);
+    RUN_TEST(get_session_context_after_tools);
+    RUN_TEST(get_session_context_no_project);
+    RUN_TEST(session_accumulates_across_tools);
+    RUN_TEST(get_session_context_tools_list_includes_tool);
 }

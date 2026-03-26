@@ -121,6 +121,9 @@ bool cbm_mcp_server_has_cached_store(cbm_mcp_server_t *srv);
 /* Get the store handle from a server (for test setup). */
 cbm_store_t *cbm_mcp_server_store(cbm_mcp_server_t *srv);
 
+/* Get the session state from a server (for testing). Returns NULL if uninitialized. */
+struct cbm_session_state *cbm_mcp_server_session(cbm_mcp_server_t *srv);
+
 /* Set the project name associated with the server's current store (for test setup).
  * This prevents resolve_store() from trying to open a .db file when tools specify a project. */
 void cbm_mcp_server_set_project(cbm_mcp_server_t *srv, const char *project);
