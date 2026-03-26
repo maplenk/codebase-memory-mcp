@@ -101,6 +101,10 @@ These features are being submitted as PRs to [DeusData/codebase-memory-mcp](http
 
 This fork will be maintained independently until/unless features are merged upstream.
 
+### Built with
+
+All features in this fork were developed with [OpenAI Codex](https://openai.com/index/codex/) and [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+
 ---
 
 ## Why codebase-memory-mcp
