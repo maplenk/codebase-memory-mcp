@@ -83,6 +83,8 @@ struct cbm_store {
 /* ── Helpers ────────────────────────────────────────────────────── */
 
 static void store_set_error(cbm_store_t *s, const char *msg) {
+    if (!s)
+        return;
     snprintf(s->errbuf, sizeof(s->errbuf), "%s", msg);
 }
 
@@ -174,8 +176,7 @@ static bool store_has_node_scores_table(cbm_store_t *s) {
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(
-        s->db,
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='node_scores' LIMIT 1;", -1,
+        s->db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='node_scores' LIMIT 1;", -1,
         &stmt, NULL);
     if (rc != SQLITE_OK) {
         s->node_scores_checked = true;
@@ -1945,7 +1946,8 @@ static int pagerank_find_node_index(const int64_t *node_ids, int count, int64_t 
     return -1;
 }
 
-int cbm_store_compute_pagerank(cbm_store_t *s, const char *project, int iterations, double damping) {
+int cbm_store_compute_pagerank(cbm_store_t *s, const char *project, int iterations,
+                               double damping) {
     int rc = CBM_STORE_OK;
     sqlite3_stmt *stmt = NULL;
     sqlite3_stmt *insert_stmt = NULL;
@@ -1973,12 +1975,11 @@ int cbm_store_compute_pagerank(cbm_store_t *s, const char *project, int iteratio
         damping = 0.85;
     }
 
-    rc = sqlite3_prepare_v2(
-        s->db,
-        "SELECT id FROM nodes "
-        "WHERE project = ?1 AND label IN ('Function','Method','Class') "
-        "ORDER BY id;",
-        -1, &stmt, NULL);
+    rc = sqlite3_prepare_v2(s->db,
+                            "SELECT id FROM nodes "
+                            "WHERE project = ?1 AND label IN ('Function','Method','Class') "
+                            "ORDER BY id;",
+                            -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         store_set_error_sqlite(s, "pagerank.nodes");
         rc = CBM_STORE_ERR;
@@ -2057,8 +2058,8 @@ int cbm_store_compute_pagerank(cbm_store_t *s, const char *project, int iteratio
 
             for (int i = 0; i < edge_count; i++) {
                 int src_idx = edges[i].src_idx;
-                int dst_idx = edges[i].dst_idx;
                 if (out_degree[src_idx] > 0) {
+                    int dst_idx = edges[i].dst_idx;
                     next_scores[dst_idx] +=
                         damping * (scores[src_idx] / (double)out_degree[src_idx]);
                 }
@@ -2539,12 +2540,12 @@ int cbm_store_search(cbm_store_t *s, const cbm_search_params_t *params, cbm_sear
     char order_limit[128];
     if (strcmp(sort_by, "degree") == 0) {
         snprintf(order_limit, sizeof(order_limit),
-                 " ORDER BY (in_deg + out_deg) DESC, pagerank DESC, name LIMIT %d OFFSET %d",
-                 limit, offset);
+                 " ORDER BY (in_deg + out_deg) DESC, pagerank DESC, name LIMIT %d OFFSET %d", limit,
+                 offset);
     } else if (strcmp(sort_by, "relevance") == 0) {
         snprintf(order_limit, sizeof(order_limit),
-                 " ORDER BY pagerank DESC, (in_deg + out_deg) DESC, name LIMIT %d OFFSET %d",
-                 limit, offset);
+                 " ORDER BY pagerank DESC, (in_deg + out_deg) DESC, name LIMIT %d OFFSET %d", limit,
+                 offset);
     } else {
         snprintf(order_limit, sizeof(order_limit), " ORDER BY name LIMIT %d OFFSET %d", limit,
                  offset);
@@ -3082,12 +3083,11 @@ static bool impact_node_in_top_five_percent(cbm_store_t *s, const char *project,
         top_count = 1;
     }
 
-    const char *higher_sql =
-        "SELECT COUNT(*) "
-        "FROM nodes n "
-        "JOIN node_scores ns ON ns.project = n.project AND ns.node_id = n.id "
-        "WHERE n.project=?1 AND n.label IN ('Function','Method','Class') "
-        "AND COALESCE(ns.pagerank, 0.0) > ?2";
+    const char *higher_sql = "SELECT COUNT(*) "
+                             "FROM nodes n "
+                             "JOIN node_scores ns ON ns.project = n.project AND ns.node_id = n.id "
+                             "WHERE n.project=?1 AND n.label IN ('Function','Method','Class') "
+                             "AND COALESCE(ns.pagerank, 0.0) > ?2";
     int higher = total;
     if (sqlite3_prepare_v2(s->db, higher_sql, -1, &stmt, NULL) != SQLITE_OK) {
         return false;
@@ -3125,9 +3125,8 @@ static int impact_select_target(cbm_store_t *s, const char *project, const char 
              "ELSE 0 END, pagerank DESC, in_deg DESC, "
              "n.qualified_name ASC LIMIT 1;",
              has_scores ? "COALESCE(ns.pagerank, 0.0) AS pagerank" : "0.0 AS pagerank",
-             has_scores
-                 ? "LEFT JOIN node_scores ns ON ns.project = n.project AND ns.node_id = n.id"
-                 : "");
+             has_scores ? "LEFT JOIN node_scores ns ON ns.project = n.project AND ns.node_id = n.id"
+                        : "");
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(s->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -3294,8 +3293,9 @@ static int impact_enqueue_neighbors(cbm_store_t *s, impact_walk_t *walk, int64_t
                                     const char *edge_type, bool inbound, int next_hop) {
     cbm_edge_t *edges = NULL;
     int edge_count = 0;
-    int rc = inbound ? cbm_store_find_edges_by_target_type(s, node_id, edge_type, &edges, &edge_count)
-                     : cbm_store_find_edges_by_source_type(s, node_id, edge_type, &edges, &edge_count);
+    int rc = inbound
+                 ? cbm_store_find_edges_by_target_type(s, node_id, edge_type, &edges, &edge_count)
+                 : cbm_store_find_edges_by_source_type(s, node_id, edge_type, &edges, &edge_count);
     if (rc != CBM_STORE_OK) {
         return rc;
     }
@@ -3339,7 +3339,8 @@ static int impact_append_item(cbm_impact_item_t **arr, int *count, int *cap, con
     return CBM_STORE_OK;
 }
 
-static int impact_append_test(cbm_affected_test_t **arr, int *count, int *cap, const cbm_node_t *node) {
+static int impact_append_test(cbm_affected_test_t **arr, int *count, int *cap,
+                              const cbm_node_t *node) {
     if (*count >= *cap) {
         int new_cap = *cap > 0 ? *cap * 2 : 4;
         *arr = safe_realloc(*arr, (size_t)new_cap * sizeof(cbm_affected_test_t));
@@ -3408,8 +3409,9 @@ static char *impact_build_summary(const cbm_impact_analysis_t *out) {
 
     char buf[256];
     if (transitive > 0) {
-        snprintf(buf, sizeof(buf), "%d direct callers, %d route/entry points, %d affected tests, "
-                                   "%d transitive impacts",
+        snprintf(buf, sizeof(buf),
+                 "%d direct callers, %d route/entry points, %d affected tests, "
+                 "%d transitive impacts",
                  direct_callers, route_entries, tests, transitive);
     } else {
         snprintf(buf, sizeof(buf), "%d direct callers, %d route/entry points, %d affected tests",
@@ -3428,7 +3430,7 @@ static char *impact_determine_risk(const cbm_impact_analysis_t *out, bool top_fi
         return heap_strdup("high");
     }
 
-    if (direct_callers >= 1 && direct_callers <= 2 && indirect_reach > 0) {
+    if (direct_callers >= 1 && indirect_reach > 0) {
         return heap_strdup(has_tests ? "low" : "medium");
     }
 
@@ -3536,7 +3538,8 @@ int cbm_store_get_impact_analysis(cbm_store_t *s, const char *project, const cha
         bool is_entry_point = impact_node_is_entry_point(node);
 
         if (is_test) {
-            rc = impact_append_test(&out->affected_tests, &out->affected_test_count, &test_cap, node);
+            rc = impact_append_test(&out->affected_tests, &out->affected_test_count, &test_cap,
+                                    node);
         } else {
             const char *item_type = (node->label && strcmp(node->label, "Route") == 0)
                                         ? "route"
@@ -5451,12 +5454,11 @@ static int summary_collect_file_rows(cbm_store_t *s, const char *project, const 
     *out_edges = NULL;
     *out_edge_count = 0;
 
-    const char *files_sql_no_focus =
-        "SELECT id, COALESCE(NULLIF(file_path, ''), name) "
-        "FROM nodes "
-        "WHERE project=?1 AND label='File' "
-        "AND lower(COALESCE(file_path, '')) NOT LIKE '%test%' "
-        "ORDER BY 2;";
+    const char *files_sql_no_focus = "SELECT id, COALESCE(NULLIF(file_path, ''), name) "
+                                     "FROM nodes "
+                                     "WHERE project=?1 AND label='File' "
+                                     "AND lower(COALESCE(file_path, '')) NOT LIKE '%test%' "
+                                     "ORDER BY 2;";
     const char *files_sql_focus =
         "SELECT n.id, COALESCE(NULLIF(n.file_path, ''), n.name) "
         "FROM nodes n "
@@ -5517,16 +5519,15 @@ static int summary_collect_file_rows(cbm_store_t *s, const char *project, const 
         }
     }
 
-    const char *edges_sql =
-        "SELECT src.file_path, dst.file_path "
-        "FROM edges e "
-        "JOIN nodes src ON src.id = e.source_id "
-        "JOIN nodes dst ON dst.id = e.target_id "
-        "WHERE e.project=?1 AND e.type='CALLS' "
-        "AND src.file_path <> '' AND dst.file_path <> '' "
-        "AND src.file_path <> dst.file_path "
-        "AND lower(src.file_path) NOT LIKE '%test%' "
-        "AND lower(dst.file_path) NOT LIKE '%test%';";
+    const char *edges_sql = "SELECT src.file_path, dst.file_path "
+                            "FROM edges e "
+                            "JOIN nodes src ON src.id = e.source_id "
+                            "JOIN nodes dst ON dst.id = e.target_id "
+                            "WHERE e.project=?1 AND e.type='CALLS' "
+                            "AND src.file_path <> '' AND dst.file_path <> '' "
+                            "AND src.file_path <> dst.file_path "
+                            "AND lower(src.file_path) NOT LIKE '%test%' "
+                            "AND lower(dst.file_path) NOT LIKE '%test%';";
 
     stmt = NULL;
     if (sqlite3_prepare_v2(s->db, edges_sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -5575,18 +5576,18 @@ static int summary_collect_file_rows(cbm_store_t *s, const char *project, const 
     return CBM_STORE_OK;
 }
 
-static int summary_fill_key_symbols(cbm_store_t *s, const char *project, cbm_arch_summary_file_t *file) {
-    const char *sql =
-        "SELECT name, "
-        "CASE WHEN end_line >= start_line AND start_line > 0 "
-        "THEN end_line - start_line + 1 ELSE 0 END AS span "
-        "FROM nodes "
-        "WHERE project=?1 AND file_path=?2 "
-        "AND label IN ('Function','Method') "
-        "AND (json_extract(properties, '$.is_test') IS NULL OR "
-        "json_extract(properties, '$.is_test') != 1) "
-        "ORDER BY span DESC, name "
-        "LIMIT 3;";
+static int summary_fill_key_symbols(cbm_store_t *s, const char *project,
+                                    cbm_arch_summary_file_t *file) {
+    const char *sql = "SELECT name, "
+                      "CASE WHEN end_line >= start_line AND start_line > 0 "
+                      "THEN end_line - start_line + 1 ELSE 0 END AS span "
+                      "FROM nodes "
+                      "WHERE project=?1 AND file_path=?2 "
+                      "AND label IN ('Function','Method') "
+                      "AND (json_extract(properties, '$.is_test') IS NULL OR "
+                      "json_extract(properties, '$.is_test') != 1) "
+                      "ORDER BY span DESC, name "
+                      "LIMIT 3;";
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(s->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -5685,21 +5686,20 @@ static int summary_query_primary_callee(cbm_store_t *s, int64_t source_id, const
         *out_file_path = NULL;
     }
 
-    const char *sql =
-        "SELECT n.id, n.name, COALESCE(n.file_path, '') "
-        "FROM edges e "
-        "JOIN nodes n ON n.id = e.target_id "
-        "WHERE e.source_id=?1 AND e.type='CALLS' "
-        "AND (json_extract(n.properties, '$.is_test') IS NULL OR "
-        "json_extract(n.properties, '$.is_test') != 1) "
-        "ORDER BY CASE "
-        "           WHEN ?2 <> '' AND COALESCE(n.file_path, '') <> '' "
-        "             AND COALESCE(n.file_path, '') <> ?2 THEN 0 "
-        "           ELSE 1 "
-        "         END, "
-        "         CASE WHEN n.label IN ('Method','Function') THEN 0 ELSE 1 END, "
-        "         n.name "
-        "LIMIT 1;";
+    const char *sql = "SELECT n.id, n.name, COALESCE(n.file_path, '') "
+                      "FROM edges e "
+                      "JOIN nodes n ON n.id = e.target_id "
+                      "WHERE e.source_id=?1 AND e.type='CALLS' "
+                      "AND (json_extract(n.properties, '$.is_test') IS NULL OR "
+                      "json_extract(n.properties, '$.is_test') != 1) "
+                      "ORDER BY CASE "
+                      "           WHEN ?2 <> '' AND COALESCE(n.file_path, '') <> '' "
+                      "             AND COALESCE(n.file_path, '') <> ?2 THEN 0 "
+                      "           ELSE 1 "
+                      "         END, "
+                      "         CASE WHEN n.label IN ('Method','Function') THEN 0 ELSE 1 END, "
+                      "         n.name "
+                      "LIMIT 1;";
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(s->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -5729,13 +5729,12 @@ static int summary_collect_routes(cbm_store_t *s, const char *project, const cha
     *out_arr = NULL;
     *out_count = 0;
 
-    const char *sql =
-        "SELECT name, properties, COALESCE(file_path, '') "
-        "FROM nodes "
-        "WHERE project=?1 AND label='Route' "
-        "AND (json_extract(properties, '$.is_test') IS NULL OR "
-        "json_extract(properties, '$.is_test') != 1) "
-        "ORDER BY name;";
+    const char *sql = "SELECT name, properties, COALESCE(file_path, '') "
+                      "FROM nodes "
+                      "WHERE project=?1 AND label='Route' "
+                      "AND (json_extract(properties, '$.is_test') IS NULL OR "
+                      "json_extract(properties, '$.is_test') != 1) "
+                      "ORDER BY name;";
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(s->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -5779,18 +5778,14 @@ static int summary_collect_routes(cbm_store_t *s, const char *project, const cha
             (void)summary_query_primary_callee(s, handler_id, handler_file, &service, &service_id,
                                                &service_file);
             if (service_id > 0) {
-                (void)summary_query_primary_callee(s, service_id,
-                                                   service_file ? service_file : handler_file, &next,
-                                                   NULL, NULL);
+                (void)summary_query_primary_callee(
+                    s, service_id, service_file ? service_file : handler_file, &next, NULL, NULL);
             }
         }
 
-        if (focus_term && focus_term[0] &&
-            !summary_text_matches(focus_term, method) &&
-            !summary_text_matches(focus_term, path) &&
-            !summary_text_matches(focus_term, handler) &&
-            !summary_text_matches(focus_term, service) &&
-            !summary_text_matches(focus_term, next) &&
+        if (focus_term && focus_term[0] && !summary_text_matches(focus_term, method) &&
+            !summary_text_matches(focus_term, path) && !summary_text_matches(focus_term, handler) &&
+            !summary_text_matches(focus_term, service) && !summary_text_matches(focus_term, next) &&
             !summary_text_matches(focus_term, handler_file)) {
             free(service_file);
             free(handler_file);
@@ -5922,7 +5917,7 @@ static int summary_build_clusters(const arch_summary_file_row_t *rows, int row_c
     }
 
     CBMHashTable *row_by_id = cbm_ht_create(row_count > 0 ? (uint32_t)row_count * 2U : 32U);
-    char(*row_id_keys)[32] = NULL;
+    char (*row_id_keys)[32] = NULL;
     if (!row_by_id) {
         free(results);
         return CBM_STORE_ERR;
@@ -6074,7 +6069,8 @@ static int summary_build_clusters(const arch_summary_file_row_t *rows, int row_c
     return CBM_STORE_OK;
 }
 
-static int summary_collect_hot_functions(cbm_store_t *s, const char *project, const char *focus_like,
+static int summary_collect_hot_functions(cbm_store_t *s, const char *project,
+                                         const char *focus_like,
                                          cbm_arch_summary_function_t **out_arr, int *out_count) {
     *out_arr = NULL;
     *out_count = 0;
@@ -6268,7 +6264,8 @@ int cbm_store_get_architecture_summary(cbm_store_t *s, const char *project, cons
     cbm_louvain_edge_t *edges = NULL;
     int row_count = 0;
     int edge_count = 0;
-    int rc = summary_collect_file_rows(s, project, focus_like, &rows, &row_count, &edges, &edge_count);
+    int rc =
+        summary_collect_file_rows(s, project, focus_like, &rows, &row_count, &edges, &edge_count);
     if (rc != CBM_STORE_OK) {
         free(focus_like);
         free(focus_term);
@@ -6298,8 +6295,8 @@ int cbm_store_get_architecture_summary(cbm_store_t *s, const char *project, cons
         rc = summary_collect_routes(s, project, focus_term, &out->routes, &out->route_count);
     }
     if (rc == CBM_STORE_OK) {
-        rc = summary_build_clusters(rows, row_count, edges, edge_count, out->routes, out->route_count,
-                                    &out->clusters, &out->cluster_count);
+        rc = summary_build_clusters(rows, row_count, edges, edge_count, out->routes,
+                                    out->route_count, &out->clusters, &out->cluster_count);
     }
     if (rc == CBM_STORE_OK) {
         rc = summary_collect_hot_functions(s, project, focus_like, &out->functions,

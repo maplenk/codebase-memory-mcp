@@ -51,7 +51,8 @@ bool cbm_session_has_area(const cbm_session_state_t *s, const char *keyword);
 /* ── Iteration ─────────────────────────────────────────────────── */
 
 void cbm_session_foreach_file_read(const cbm_session_state_t *s, cbm_session_iter_fn fn, void *ud);
-void cbm_session_foreach_file_edited(const cbm_session_state_t *s, cbm_session_iter_fn fn, void *ud);
+void cbm_session_foreach_file_edited(const cbm_session_state_t *s, cbm_session_iter_fn fn,
+                                     void *ud);
 void cbm_session_foreach_symbol(const cbm_session_state_t *s, cbm_session_iter_fn fn, void *ud);
 void cbm_session_foreach_area(const cbm_session_state_t *s, cbm_session_iter_fn fn, void *ud);
 void cbm_session_foreach_impact(const cbm_session_state_t *s, cbm_session_iter_fn fn, void *ud);

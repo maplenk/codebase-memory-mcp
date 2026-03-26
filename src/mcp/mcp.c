@@ -309,8 +309,7 @@ static size_t estimate_query_row_chars(const char *const *row, int col_count, bo
 }
 
 static void add_query_row(yyjson_mut_doc *doc, yyjson_mut_val *rows, const char *const *row,
-                          int col_count,
-                          bool compact) {
+                          int col_count, bool compact) {
     yyjson_mut_val *out_row = yyjson_mut_arr(doc);
     for (int c = 0; c < col_count; c++) {
         const char *cell = row[c] ? row[c] : "";
@@ -362,25 +361,28 @@ static int impact_output_total_results(const cbm_impact_analysis_t *impact, bool
 static char *impact_output_summary_dup(const cbm_impact_analysis_t *impact, bool include_tests) {
     int direct_callers = impact_output_direct_caller_count(impact);
     int route_entries = impact_output_route_entry_count(impact);
-    int tests = impact->affected_test_count;
     int transitive = impact->transitive_count;
 
     char buf[256];
     if (include_tests) {
+        int tests = impact->affected_test_count;
         if (transitive > 0) {
             snprintf(buf, sizeof(buf),
-                     "%d direct callers, %d route/entry points, %d affected tests, %d transitive impacts",
+                     "%d direct callers, %d route/entry points, %d affected tests, %d transitive "
+                     "impacts",
                      direct_callers, route_entries, tests, transitive);
         } else {
-            snprintf(buf, sizeof(buf), "%d direct callers, %d route/entry points, %d affected tests",
-                     direct_callers, route_entries, tests);
+            snprintf(buf, sizeof(buf),
+                     "%d direct callers, %d route/entry points, %d affected tests", direct_callers,
+                     route_entries, tests);
         }
     } else if (transitive > 0) {
-        snprintf(buf, sizeof(buf), "%d direct callers, %d route/entry points, %d transitive impacts",
-                 direct_callers, route_entries, transitive);
+        snprintf(buf, sizeof(buf),
+                 "%d direct callers, %d route/entry points, %d transitive impacts", direct_callers,
+                 route_entries, transitive);
     } else {
-        snprintf(buf, sizeof(buf), "%d direct callers, %d route/entry points",
-                 direct_callers, route_entries);
+        snprintf(buf, sizeof(buf), "%d direct callers, %d route/entry points", direct_callers,
+                 route_entries);
     }
     return heap_strdup(buf);
 }
@@ -536,11 +538,11 @@ static bool markdown_builder_appendf(markdown_builder_t *b, const char *fmt, ...
 }
 
 static char *markdown_builder_finish(markdown_builder_t *b) {
-    const char *note = "\n_Truncated at max_tokens._\n";
     if (!b || !b->buf) {
         return NULL;
     }
     if (b->truncated) {
+        const char *note = "\n_Truncated at max_tokens._\n";
         size_t note_len = strlen(note);
         if (note_len <= b->limit) {
             size_t keep_len = b->len;
@@ -549,8 +551,7 @@ static char *markdown_builder_finish(markdown_builder_t *b) {
                 keep_len = b->limit - note_len;
             }
             final_len = keep_len + note_len;
-            if (final_len > b->len &&
-                !markdown_builder_reserve(b, final_len - b->len)) {
+            if (final_len > b->len && !markdown_builder_reserve(b, final_len - b->len)) {
                 return b->buf;
             }
             b->len = keep_len;
@@ -725,7 +726,8 @@ static const tool_def_t TOOLS[] = {
      "{\"type\":\"integer\"},\"max_degree\":{\"type\":\"integer\"},\"exclude_entry_points\":{"
      "\"type\":\"boolean\"},\"include_connected\":{\"type\":\"boolean\"},\"limit\":{\"type\":"
      "\"integer\",\"description\":\"Max results. Default: "
-     "unlimited\"},\"offset\":{\"type\":\"integer\",\"default\":0},\"ranked\":{\"type\":\"boolean\","
+     "unlimited\"},\"offset\":{\"type\":\"integer\",\"default\":0},\"ranked\":{\"type\":"
+     "\"boolean\","
      "\"default\":true,\"description\":\"Sort results by PageRank importance when available.\"},"
      "\"max_tokens\":{\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output "
      "size. Truncates lower-ranked results when needed.\"}},"
@@ -748,7 +750,8 @@ static const tool_def_t TOOLS[] = {
      "{\"type\":\"object\",\"properties\":{\"function_name\":{\"type\":\"string\"},\"project\":{"
      "\"type\":\"string\"},\"direction\":{\"type\":\"string\",\"enum\":[\"inbound\",\"outbound\","
      "\"both\"],\"default\":\"both\"},\"depth\":{\"type\":\"integer\",\"default\":3},\"edge_"
-     "types\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"ranked\":{\"type\":\"boolean\","
+     "types\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"ranked\":{\"type\":"
+     "\"boolean\","
      "\"default\":true,\"description\":\"Sort callers/callees by PageRank importance.\"},"
      "\"max_tokens\":{\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output "
      "size. Truncates lower-ranked path results when needed.\"}},"
@@ -1145,8 +1148,7 @@ static cbm_session_state_t *ensure_session(cbm_mcp_server_t *srv) {
 static char *build_search_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
                                        const char *project, const cbm_search_output_t *out);
 static char *build_impact_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
-                                       const char *project,
-                                       const cbm_impact_analysis_t *impact);
+                                       const char *project, const cbm_impact_analysis_t *impact);
 static void maybe_add_session_hint(yyjson_mut_doc *doc, yyjson_mut_val *root, const char *hint,
                                    size_t char_budget, size_t *used);
 
@@ -1956,8 +1958,7 @@ static char *handle_get_key_symbols(cbm_mcp_server_t *srv, const char *args) {
 
     cbm_key_symbol_t *symbols = NULL;
     int count = 0;
-    if (cbm_store_get_key_symbols(store, project, focus, limit, &symbols, &count) !=
-        CBM_STORE_OK) {
+    if (cbm_store_get_key_symbols(store, project, focus, limit, &symbols, &count) != CBM_STORE_OK) {
         free(project);
         free(focus);
         return cbm_mcp_text_result("failed to load key symbols", true);
@@ -2096,8 +2097,7 @@ static char *handle_get_impact_analysis(cbm_mcp_server_t *srv, const char *args)
     }
     yyjson_mut_obj_add_val(doc, root, "affected_tests", tests);
 
-    yyjson_mut_obj_add_str(doc, root, "risk_score",
-                           impact.risk_score ? impact.risk_score : "");
+    yyjson_mut_obj_add_str(doc, root, "risk_score", impact.risk_score ? impact.risk_score : "");
     yyjson_mut_obj_add_str(doc, root, "summary", summary_text ? summary_text : "");
 
     /* Session hint (Phase 7B) */
@@ -2141,8 +2141,8 @@ static char *handle_get_impact_analysis(cbm_mcp_server_t *srv, const char *args)
                                   impact.indirect_count, char_budget, &used, &shown, &full_items,
                                   &stop);
         add_budgeted_impact_group(doc, impact_obj2, "transitive", impact.transitive,
-                                  impact.transitive_count, char_budget, &used, &shown,
-                                  &full_items, &stop);
+                                  impact.transitive_count, char_budget, &used, &shown, &full_items,
+                                  &stop);
         yyjson_mut_obj_add_val(doc, root, "impact", impact_obj2);
 
         yyjson_mut_val *tests2 = yyjson_mut_arr(doc);
@@ -2160,8 +2160,7 @@ static char *handle_get_impact_analysis(cbm_mcp_server_t *srv, const char *args)
             }
         }
         yyjson_mut_obj_add_val(doc, root, "affected_tests", tests2);
-        yyjson_mut_obj_add_str(doc, root, "risk_score",
-                               impact.risk_score ? impact.risk_score : "");
+        yyjson_mut_obj_add_str(doc, root, "risk_score", impact.risk_score ? impact.risk_score : "");
         yyjson_mut_obj_add_str(doc, root, "summary", summary_text ? summary_text : "");
         yyjson_mut_obj_add_int(doc, root, "shown", shown);
         maybe_add_session_hint(doc, root, impact_hint, char_budget, &used);
@@ -2319,14 +2318,16 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
                         break;
                     }
                     if (summary.files[i].symbols[j].span_lines > 0) {
-                        (void)markdown_builder_appendf(
-                            &md, "%s (%d lines)",
-                            summary.files[i].symbols[j].name ? summary.files[i].symbols[j].name : "",
-                            summary.files[i].symbols[j].span_lines);
+                        (void)markdown_builder_appendf(&md, "%s (%d lines)",
+                                                       summary.files[i].symbols[j].name
+                                                           ? summary.files[i].symbols[j].name
+                                                           : "",
+                                                       summary.files[i].symbols[j].span_lines);
                     } else {
-                        (void)markdown_builder_appendf(
-                            &md, "%s",
-                            summary.files[i].symbols[j].name ? summary.files[i].symbols[j].name : "");
+                        (void)markdown_builder_appendf(&md, "%s",
+                                                       summary.files[i].symbols[j].name
+                                                           ? summary.files[i].symbols[j].name
+                                                           : "");
                     }
                 }
                 (void)markdown_builder_append_raw(&md, "\n");
@@ -2340,9 +2341,9 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
         (void)markdown_builder_append_raw(&md, "No matching routes.\n\n");
     } else {
         for (int i = 0; i < summary.route_count; i++) {
-            (void)markdown_builder_appendf(
-                &md, "%s %s", summary.routes[i].method ? summary.routes[i].method : "",
-                summary.routes[i].path ? summary.routes[i].path : "");
+            (void)markdown_builder_appendf(&md, "%s %s",
+                                           summary.routes[i].method ? summary.routes[i].method : "",
+                                           summary.routes[i].path ? summary.routes[i].path : "");
             if (summary.routes[i].handler && summary.routes[i].handler[0]) {
                 (void)markdown_builder_appendf(&md, " -> %s", summary.routes[i].handler);
             }
@@ -2384,11 +2385,10 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
                     if (j > 0) {
                         (void)markdown_builder_append_raw(&md, ", ");
                     }
-                    (void)markdown_builder_appendf(
-                        &md, "%s",
-                        summary.clusters[i].entry_points[j]
-                            ? summary.clusters[i].entry_points[j]
-                            : "");
+                    (void)markdown_builder_appendf(&md, "%s",
+                                                   summary.clusters[i].entry_points[j]
+                                                       ? summary.clusters[i].entry_points[j]
+                                                       : "");
                 }
                 (void)markdown_builder_append_raw(&md, "\n");
             }
@@ -2401,10 +2401,10 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
         (void)markdown_builder_append_raw(&md, "None above threshold.\n\n");
     } else {
         for (int i = 0; i < summary.function_count; i++) {
-            (void)markdown_builder_appendf(
-                &md, "%s - called by %d functions",
-                summary.functions[i].name ? summary.functions[i].name : "",
-                summary.functions[i].in_degree);
+            (void)markdown_builder_appendf(&md, "%s - called by %d functions",
+                                           summary.functions[i].name ? summary.functions[i].name
+                                                                     : "",
+                                           summary.functions[i].in_degree);
             if (summary.functions[i].file && summary.functions[i].file[0]) {
                 (void)markdown_builder_appendf(&md, " [%s]", summary.functions[i].file);
             }
@@ -2418,11 +2418,10 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
         (void)markdown_builder_append_raw(&md, "No matching entry points.\n");
     } else {
         for (int i = 0; i < summary.entry_point_count; i++) {
-            (void)markdown_builder_appendf(&md, "%s: %d\n",
-                                           summary.entry_points[i].kind
-                                               ? summary.entry_points[i].kind
-                                               : "Other",
-                                           summary.entry_points[i].count);
+            (void)markdown_builder_appendf(
+                &md, "%s: %d\n",
+                summary.entry_points[i].kind ? summary.entry_points[i].kind : "Other",
+                summary.entry_points[i].count);
         }
     }
 
@@ -2634,9 +2633,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
             }
             yyjson_mut_obj_add_val(doc, root, "callers", callers);
             if (shown_callers < tr_in.visited_count) {
-                char *chain =
-                    build_compact_hop_chain(tr_in.visited + shown_callers,
-                                            tr_in.visited_count - shown_callers);
+                char *chain = build_compact_hop_chain(tr_in.visited + shown_callers,
+                                                      tr_in.visited_count - shown_callers);
                 if (chain && chain[0]) {
                     yyjson_mut_obj_add_strcpy(doc, root, "callers_chain", chain);
                 }
@@ -3176,8 +3174,7 @@ typedef struct {
 static char *build_explore_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
                                         const char *project, const char *area,
                                         bool was_area_explored,
-                                        const cbm_search_result_t *const *matches,
-                                        int match_count);
+                                        const cbm_search_result_t *const *matches, int match_count);
 static char *build_understand_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
                                            const char *project, const char *symbol,
                                            bool was_already_queried,
@@ -3357,9 +3354,8 @@ static bool append_unique_search_ref(const cbm_search_result_t *sr,
     return true;
 }
 
-static void append_matching_refs(const cbm_search_output_t *out, const char *area,
-                                 bool symbol_only, const cbm_search_result_t ***refs,
-                                 int *count, int *cap) {
+static void append_matching_refs(const cbm_search_output_t *out, const char *area, bool symbol_only,
+                                 const cbm_search_result_t ***refs, int *count, int *cap) {
     if (!out || !refs || !count || !cap) {
         return;
     }
@@ -3442,7 +3438,8 @@ static void free_explore_dependencies(explore_dependency_t *deps, int count) {
 }
 
 static int collect_explore_dependencies(cbm_store_t *store, const cbm_search_result_t **matches,
-                                        int match_count, explore_dependency_t **out, int *out_count) {
+                                        int match_count, explore_dependency_t **out,
+                                        int *out_count) {
     *out = NULL;
     *out_count = 0;
     if (!store || !matches || match_count <= 0) {
@@ -3471,8 +3468,8 @@ static int collect_explore_dependencies(cbm_store_t *store, const cbm_search_res
 }
 
 static int collect_connected_symbols(const cbm_traverse_result_t *callers,
-                                     const cbm_traverse_result_t *callees,
-                                     connected_symbol_t **out, int *out_count) {
+                                     const cbm_traverse_result_t *callees, connected_symbol_t **out,
+                                     int *out_count) {
     *out = NULL;
     *out_count = 0;
 
@@ -3658,8 +3655,8 @@ static size_t estimate_key_symbol_chars(const cbm_key_symbol_t *sym, bool compac
     return size;
 }
 
-static void add_key_symbol_json(yyjson_mut_doc *doc, yyjson_mut_val *arr, const cbm_key_symbol_t *sym,
-                                bool compact) {
+static void add_key_symbol_json(yyjson_mut_doc *doc, yyjson_mut_val *arr,
+                                const cbm_key_symbol_t *sym, bool compact) {
     yyjson_mut_val *item = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_str(doc, item, "name", sym->name ? sym->name : "");
     yyjson_mut_obj_add_str(doc, item, "file_path", sym->file_path ? sym->file_path : "");
@@ -3731,8 +3728,7 @@ static void add_string_array_json(yyjson_mut_doc *doc, yyjson_mut_val *arr, char
 static void add_explore_dependency_json(yyjson_mut_doc *doc, yyjson_mut_val *arr,
                                         const explore_dependency_t *dep, bool compact) {
     yyjson_mut_val *item = yyjson_mut_obj(doc);
-    yyjson_mut_obj_add_str(doc, item, "name",
-                           dep->match->node.name ? dep->match->node.name : "");
+    yyjson_mut_obj_add_str(doc, item, "name", dep->match->node.name ? dep->match->node.name : "");
     yyjson_mut_obj_add_str(doc, item, "file_path",
                            dep->match->node.file_path ? dep->match->node.file_path : "");
     if (compact) {
@@ -3794,8 +3790,8 @@ static void add_connected_symbol_json(yyjson_mut_doc *doc, yyjson_mut_val *arr,
                                       const connected_symbol_t *item, bool compact) {
     yyjson_mut_val *entry = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_str(doc, entry, "name", item->node.name ? item->node.name : "");
-    yyjson_mut_obj_add_str(doc, entry, "file_path", item->node.file_path ? item->node.file_path
-                                                                         : "");
+    yyjson_mut_obj_add_str(doc, entry, "file_path",
+                           item->node.file_path ? item->node.file_path : "");
     yyjson_mut_obj_add_int(doc, entry, "start_line", item->node.start_line);
     yyjson_mut_obj_add_str(doc, entry, "relation", connected_relation_label(item->relation_mask));
     if (compact) {
@@ -3861,8 +3857,8 @@ static char *build_symbol_suggestions_response(const char *input, cbm_node_t *no
                                nodes[i].qualified_name ? nodes[i].qualified_name : "");
         yyjson_mut_obj_add_str(doc, item, "name", nodes[i].name ? nodes[i].name : "");
         yyjson_mut_obj_add_str(doc, item, "label", nodes[i].label ? nodes[i].label : "");
-        yyjson_mut_obj_add_str(doc, item, "file_path", nodes[i].file_path ? nodes[i].file_path
-                                                                           : "");
+        yyjson_mut_obj_add_str(doc, item, "file_path",
+                               nodes[i].file_path ? nodes[i].file_path : "");
         yyjson_mut_arr_add_val(arr, item);
     }
     yyjson_mut_obj_add_val(doc, root, "suggestions", arr);
@@ -4075,8 +4071,8 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     yyjson_mut_obj_add_val(doc, root, "entry_points", entry_arr);
 
     /* Compute session hint (Phase 7B) */
-    explore_hint =
-        build_explore_session_hint(srv, store, project, area, was_area_explored, matches, match_count);
+    explore_hint = build_explore_session_hint(srv, store, project, area, was_area_explored, matches,
+                                              match_count);
     maybe_add_session_hint(doc, root, explore_hint, 0, NULL);
 
     char *json = yy_doc_to_str(doc);
@@ -4366,8 +4362,8 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
     yyjson_mut_obj_add_val(doc, root, "connected_symbols", connected_arr);
 
     /* Compute session hint (Phase 7B) */
-    understand_hint = build_understand_session_hint(srv, store, project, symbol,
-                                                    was_already_queried, connected, connected_count);
+    understand_hint = build_understand_session_hint(
+        srv, store, project, symbol, was_already_queried, connected, connected_count);
     maybe_add_session_hint(doc, root, understand_hint, 0, NULL);
 
     char *json = yy_doc_to_str(doc);
@@ -4389,8 +4385,8 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
         yyjson_mut_obj_add_bool(doc, root, "is_key_symbol", is_key_symbol);
         yyjson_mut_obj_add_bool(doc, root, "truncated", true);
         yyjson_mut_obj_add_int(doc, root, "total_results",
-                               1 + callers.visited_count + callees.visited_count +
-                                   connected_count + (auto_picked ? exact_ref_count - 1 : 0));
+                               1 + callers.visited_count + callees.visited_count + connected_count +
+                                   (auto_picked ? exact_ref_count - 1 : 0));
 
         size_t used = 96 + strlen(symbol) +
                       strlen(selected->node.qualified_name ? selected->node.qualified_name : "");
@@ -4731,7 +4727,8 @@ static char *handle_prepare_change(cbm_mcp_server_t *srv, const char *args) {
                 }
                 if (!stop) {
                     for (int i = 0; i < scope.should_review_count; i++) {
-                        size_t item_estimate = estimate_string_list_entry_chars(scope.should_review[i]);
+                        size_t item_estimate =
+                            estimate_string_list_entry_chars(scope.should_review[i]);
                         if (used + item_estimate > char_budget && shown > 0) {
                             stop = true;
                             break;
@@ -5698,13 +5695,15 @@ static char *handle_ingest_traces(cbm_mcp_server_t *srv, const char *args) {
 #define SESSION_HINT_QUERY_THRESHOLD 10
 
 /* Safe snprintf offset update: clamp to buffer size to prevent overflow. */
-#define HINT_SNPRINTF(buf, bufsz, offvar, ...)                                        \
-    do {                                                                              \
-        if ((offvar) < (int)(bufsz)) {                                                \
+#define HINT_SNPRINTF(buf, bufsz, offvar, ...)                                              \
+    do {                                                                                    \
+        if ((offvar) < (int)(bufsz)) {                                                      \
             int _ret = snprintf((buf) + (offvar), (bufsz) - (size_t)(offvar), __VA_ARGS__); \
-            if (_ret > 0) (offvar) += _ret;                                           \
-            if ((offvar) >= (int)(bufsz)) (offvar) = (int)(bufsz) - 1;                \
-        }                                                                             \
+            if (_ret > 0)                                                                   \
+                (offvar) += _ret;                                                           \
+            if ((offvar) >= (int)(bufsz))                                                   \
+                (offvar) = (int)(bufsz) - 1;                                                \
+        }                                                                                   \
     } while (0)
 
 /* Append a global "high-PageRank untouched" suggestion to buf.
@@ -5731,8 +5730,7 @@ static int append_global_pagerank_hint(cbm_mcp_server_t *srv, cbm_store_t *store
             HINT_SNPRINTF(buf, (size_t)bufsz, off,
                           "%sYou've made %d queries but haven't examined %s"
                           " (PageRank #%d, %d inbound calls).",
-                          start_off > 0 ? " " : "", qc, syms[i].name, i + 1,
-                          syms[i].in_degree);
+                          start_off > 0 ? " " : "", qc, syms[i].name, i + 1, syms[i].in_degree);
             break;
         }
     }
@@ -5768,19 +5766,17 @@ static char *build_explore_session_hint(cbm_mcp_server_t *srv, cbm_store_t *stor
                 if (noff > 0) {
                     HINT_SNPRINTF(new_names, sizeof(new_names), noff, ", ");
                 }
-                HINT_SNPRINTF(new_names, sizeof(new_names), noff, "%s",
-                              matches[i]->node.name);
+                HINT_SNPRINTF(new_names, sizeof(new_names), noff, "%s", matches[i]->node.name);
                 new_count++;
             }
         }
         if (new_count > 0) {
             HINT_SNPRINTF(buf, sizeof(buf), off,
-                          "You previously explored '%s'. New results not seen before: %s.",
-                          area, new_names);
+                          "You previously explored '%s'. New results not seen before: %s.", area,
+                          new_names);
         } else {
             HINT_SNPRINTF(buf, sizeof(buf), off,
-                          "You previously explored '%s'. All results were already examined.",
-                          area);
+                          "You previously explored '%s'. All results were already examined.", area);
         }
     }
 
@@ -5809,8 +5805,8 @@ static char *build_understand_session_hint(cbm_mcp_server_t *srv, cbm_store_t *s
     int off = 0;
 
     if (was_already_queried) {
-        HINT_SNPRINTF(buf, sizeof(buf), off,
-                      "You already queried '%s' earlier in this session.", symbol);
+        HINT_SNPRINTF(buf, sizeof(buf), off, "You already queried '%s' earlier in this session.",
+                      symbol);
     }
 
     /* Find connected symbols not yet examined */
@@ -5823,15 +5819,13 @@ static char *build_understand_session_hint(cbm_mcp_server_t *srv, cbm_store_t *s
             if (noff > 0) {
                 HINT_SNPRINTF(unseen_names, sizeof(unseen_names), noff, ", ");
             }
-            HINT_SNPRINTF(unseen_names, sizeof(unseen_names), noff, "%s",
-                          connected[i].node.name);
+            HINT_SNPRINTF(unseen_names, sizeof(unseen_names), noff, "%s", connected[i].node.name);
             unseen_count++;
         }
     }
     if (unseen_count > 0) {
-        HINT_SNPRINTF(buf, sizeof(buf), off,
-                      "%sRelated symbols not yet examined: %s.", off > 0 ? " " : "",
-                      unseen_names);
+        HINT_SNPRINTF(buf, sizeof(buf), off, "%sRelated symbols not yet examined: %s.",
+                      off > 0 ? " " : "", unseen_names);
     }
 
     off += append_global_pagerank_hint(srv, store, project, buf, off, (int)sizeof(buf));
@@ -5846,8 +5840,7 @@ static char *build_understand_session_hint(cbm_mcp_server_t *srv, cbm_store_t *s
  * overlaps with already-edited files.
  * Returns heap string or NULL. Caller frees. */
 static char *build_impact_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
-                                       const char *project,
-                                       const cbm_impact_analysis_t *impact) {
+                                       const char *project, const cbm_impact_analysis_t *impact) {
     cbm_session_state_t *ss = srv->session;
     if (!ss || !impact) {
         return NULL;
@@ -5904,8 +5897,7 @@ static char *build_impact_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store
     }
 
     if (edited_count > 0) {
-        HINT_SNPRINTF(buf, sizeof(buf), off,
-                      "Warning: %s %s already edited this session.",
+        HINT_SNPRINTF(buf, sizeof(buf), off, "Warning: %s %s already edited this session.",
                       edited_files, edited_count > 1 ? "were" : "was");
     }
 
@@ -5938,11 +5930,11 @@ static char *build_search_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store
         }
     }
     if (seen > 0 && seen < out->count) {
-        HINT_SNPRINTF(buf, sizeof(buf), off,
-                      "%d of %d results were already examined this session.", seen, out->count);
+        HINT_SNPRINTF(buf, sizeof(buf), off, "%d of %d results were already examined this session.",
+                      seen, out->count);
     } else if (seen > 0 && seen == out->count) {
-        HINT_SNPRINTF(buf, sizeof(buf), off,
-                      "All %d results were already examined this session.", out->count);
+        HINT_SNPRINTF(buf, sizeof(buf), off, "All %d results were already examined this session.",
+                      out->count);
     }
 
     off += append_global_pagerank_hint(srv, store, project, buf, off, (int)sizeof(buf));
@@ -6043,17 +6035,18 @@ static char *handle_get_session_summary(cbm_mcp_server_t *srv, const char *args)
     time_t start = cbm_session_start_time(ss);
     time_t now = time(NULL);
     int elapsed = (int)(now - start);
-    if (elapsed < 0) elapsed = 0;
+    if (elapsed < 0)
+        elapsed = 0;
     int minutes = elapsed / 60;
     int seconds = elapsed % 60;
     int qc = cbm_session_query_count(ss);
 
     if (minutes > 0) {
-        (void)markdown_builder_appendf(&md, "## Session Summary (%d queries, %dm%ds)\n\n",
-                                       qc, minutes, seconds);
+        (void)markdown_builder_appendf(&md, "## Session Summary (%d queries, %dm%ds)\n\n", qc,
+                                       minutes, seconds);
     } else {
-        (void)markdown_builder_appendf(&md, "## Session Summary (%d queries, %ds)\n\n",
-                                       qc, seconds);
+        (void)markdown_builder_appendf(&md, "## Session Summary (%d queries, %ds)\n\n", qc,
+                                       seconds);
     }
 
     /* ── Files touched ───────────────────────────────────────── */
@@ -6098,8 +6091,8 @@ static char *handle_get_session_summary(cbm_mcp_server_t *srv, const char *args)
                 int ks_count = 0;
                 cbm_store_get_key_symbols(store, project, name, 1, &ks, &ks_count);
                 if (ks_count > 0 && ks[0].name && strcmp(ks[0].name, name) == 0) {
-                    (void)markdown_builder_appendf(&md, "- %s (%d callers, PageRank %.4f)",
-                                                   name, ks[0].in_degree, ks[0].pagerank);
+                    (void)markdown_builder_appendf(&md, "- %s (%d callers, PageRank %.4f)", name,
+                                                   ks[0].in_degree, ks[0].pagerank);
                 } else {
                     (void)markdown_builder_appendf(&md, "- %s", name);
                 }
@@ -6154,19 +6147,23 @@ static char *handle_get_session_summary(cbm_mcp_server_t *srv, const char *args)
                         if (callers[k] && !cbm_session_has_symbol(ss, callers[k]) &&
                             !cbm_ht_has(candidates, callers[k])) {
                             char *key = strdup(callers[k]);
-                            if (key) cbm_ht_set(candidates, key, (void *)lookup_names[i]);
+                            if (key)
+                                cbm_ht_set(candidates, key, (void *)lookup_names[i]);
                         }
                     }
                     for (int k = 0; k < callee_count; k++) {
                         if (callees[k] && !cbm_session_has_symbol(ss, callees[k]) &&
                             !cbm_ht_has(candidates, callees[k])) {
                             char *key = strdup(callees[k]);
-                            if (key) cbm_ht_set(candidates, key, (void *)lookup_names[i]);
+                            if (key)
+                                cbm_ht_set(candidates, key, (void *)lookup_names[i]);
                         }
                     }
-                    for (int k = 0; k < caller_count; k++) free(callers[k]);
+                    for (int k = 0; k < caller_count; k++)
+                        free(callers[k]);
                     free(callers);
-                    for (int k = 0; k < callee_count; k++) free(callees[k]);
+                    for (int k = 0; k < callee_count; k++)
+                        free(callees[k]);
                     free(callees);
                 }
                 cbm_store_free_nodes(nodes, ncount);
@@ -6185,12 +6182,10 @@ static char *handle_get_session_summary(cbm_mcp_server_t *srv, const char *args)
                             (void)markdown_builder_append_raw(&md, "### Suggested next steps\n");
                             header_emitted = true;
                         }
-                        const char *reason =
-                            (const char *)cbm_ht_get(candidates, key_syms[i].name);
+                        const char *reason = (const char *)cbm_ht_get(candidates, key_syms[i].name);
                         (void)markdown_builder_appendf(
                             &md, "- Examine %s%s%s (neighbor of %s, not yet examined)\n",
-                            key_syms[i].name,
-                            key_syms[i].file_path ? " in " : "",
+                            key_syms[i].name, key_syms[i].file_path ? " in " : "",
                             key_syms[i].file_path ? key_syms[i].file_path : "",
                             reason ? reason : "queried symbol");
                         emitted++;
@@ -6235,10 +6230,10 @@ static char *handle_get_session_context(cbm_mcp_server_t *srv, const char *args)
     json_arr_ctx_t jctx;
     jctx.doc = doc;
 
-#define EMIT_SET_ARRAY(field_name, foreach_fn)        \
-    do {                                              \
-        jctx.arr = yyjson_mut_arr(doc);               \
-        foreach_fn(ss, append_key_to_json_arr, &jctx); \
+#define EMIT_SET_ARRAY(field_name, foreach_fn)                   \
+    do {                                                         \
+        jctx.arr = yyjson_mut_arr(doc);                          \
+        foreach_fn(ss, append_key_to_json_arr, &jctx);           \
         yyjson_mut_obj_add_val(doc, root, field_name, jctx.arr); \
     } while (0)
 

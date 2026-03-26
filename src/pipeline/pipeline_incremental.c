@@ -198,8 +198,8 @@ int cbm_pipeline_run_incremental(cbm_pipeline_t *p, const char *db_path, cbm_fil
         cbm_clock_gettime(CLOCK_MONOTONIC, &t);
         if (cbm_store_compute_pagerank(store, project, 20, 0.85) != CBM_STORE_OK) {
             /* Preserve the successful no-op index result even if ranking refresh fails. */
-            cbm_log_warn("incremental.warn", "msg", "pagerank_failed", "project", project,
-                         "error", cbm_store_error(store));
+            cbm_log_warn("incremental.warn", "msg", "pagerank_failed", "project", project, "error",
+                         cbm_store_error(store));
         } else {
             cbm_log_info("pass.timing", "pass", "incr_pagerank", "elapsed_ms",
                          itoa_buf((int)elapsed_ms(t)));
