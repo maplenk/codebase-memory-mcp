@@ -226,6 +226,15 @@ static size_t estimate_search_result_chars(const cbm_search_result_t *sr, bool c
     } else {
         size += 24;
     }
+    /* Account for connected_names array if populated (mirrors add_search_result_item) */
+    if (sr->connected_count > 0 && sr->connected_names) {
+        size += 24; /* "connected_names":[] overhead */
+        for (int i = 0; i < sr->connected_count; i++) {
+            if (sr->connected_names[i]) {
+                size += strlen(sr->connected_names[i]) + 4; /* "name", */
+            }
+        }
+    }
     return size;
 }
 
@@ -252,6 +261,17 @@ static void add_search_result_item(yyjson_mut_doc *doc, yyjson_mut_val *results,
         yyjson_mut_obj_add_int(doc, item, "in_degree", sr->in_degree);
         yyjson_mut_obj_add_int(doc, item, "out_degree", sr->out_degree);
         yyjson_mut_obj_add_real(doc, item, "pagerank", sr->pagerank);
+    }
+
+    /* Include connected node names if populated */
+    if (sr->connected_count > 0 && sr->connected_names) {
+        yyjson_mut_val *conn = yyjson_mut_arr(doc);
+        for (int i = 0; i < sr->connected_count; i++) {
+            if (sr->connected_names[i]) {
+                yyjson_mut_arr_add_strcpy(doc, conn, sr->connected_names[i]);
+            }
+        }
+        yyjson_mut_obj_add_val(doc, item, "connected_names", conn);
     }
 
     yyjson_mut_arr_add_val(results, item);
@@ -1081,6 +1101,46 @@ static bool cbm_mcp_get_bool_arg_default(const char *args_json, const char *key,
     return result;
 }
 
+/* Extract a JSON string array. Returns heap-allocated array of heap strings.
+ * Sets *out_count. Returns NULL only when the key is absent or not an array.
+ * For an empty array [], returns a non-NULL pointer with *out_count = 0
+ * so callers can distinguish "not provided" from "explicitly empty". */
+static char **cbm_mcp_get_string_array_arg(const char *args_json, const char *key, int *out_count) {
+    *out_count = 0;
+    yyjson_doc *doc = yyjson_read(args_json, strlen(args_json), 0);
+    if (!doc) {
+        return NULL;
+    }
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *arr = yyjson_obj_get(root, key);
+    if (!arr || !yyjson_is_arr(arr)) {
+        yyjson_doc_free(doc);
+        return NULL;
+    }
+    int count = (int)yyjson_arr_size(arr);
+    if (count == 0) {
+        /* Key present but empty array — return non-NULL sentinel with count=0 */
+        yyjson_doc_free(doc);
+        return calloc(1, sizeof(char *)); /* non-NULL zero-initialized, caller frees */
+    }
+    char **result = malloc((size_t)count * sizeof(char *));
+    int n = 0;
+    size_t idx, max;
+    yyjson_val *val;
+    yyjson_arr_foreach(arr, idx, max, val) {
+        if (yyjson_is_str(val)) {
+            result[n++] = heap_strdup(yyjson_get_str(val));
+        }
+    }
+    yyjson_doc_free(doc);
+    if (n == 0) {
+        /* Array had elements but none were strings — still "provided" */
+        return result; /* non-NULL, count stays 0 */
+    }
+    *out_count = n;
+    return result;
+}
+
 /* ══════════════════════════════════════════════════════════════════
  *  MCP SERVER
  * ══════════════════════════════════════════════════════════════════ */
@@ -1553,6 +1613,9 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
     char *name_pattern = cbm_mcp_get_string_arg(args, "name_pattern");
     char *qn_pattern = cbm_mcp_get_string_arg(args, "qn_pattern");
     char *file_pattern = cbm_mcp_get_string_arg(args, "file_pattern");
+    char *relationship = cbm_mcp_get_string_arg(args, "relationship");
+    bool exclude_entry_points = cbm_mcp_get_bool_arg(args, "exclude_entry_points");
+    bool include_connected = cbm_mcp_get_bool_arg(args, "include_connected");
     int limit = cbm_mcp_get_int_arg(args, "limit", 500000);
     int offset = cbm_mcp_get_int_arg(args, "offset", 0);
     int min_degree = cbm_mcp_get_int_arg(args, "min_degree", -1);
@@ -1567,6 +1630,9 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
         .name_pattern = name_pattern,
         .qn_pattern = qn_pattern,
         .file_pattern = file_pattern,
+        .relationship = relationship,
+        .exclude_entry_points = exclude_entry_points,
+        .include_connected = include_connected,
         .limit = limit,
         .offset = offset,
         .min_degree = min_degree,
@@ -1659,6 +1725,7 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
     free(name_pattern);
     free(qn_pattern);
     free(file_pattern);
+    free(relationship);
 
     char *result = cbm_mcp_text_result(json, false);
     free(json);
@@ -2447,9 +2514,15 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     bool ranked = cbm_mcp_get_bool_arg_default(args, "ranked", true);
     size_t char_budget = max_tokens_to_char_budget(max_tokens);
 
+    /* Extract edge_types array; fall back to {"CALLS"} if not provided */
+    int user_edge_type_count = 0;
+    char **user_edge_types = cbm_mcp_get_string_array_arg(args, "edge_types", &user_edge_type_count);
+
     if (!func_name) {
         free(project);
         free(direction);
+        for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+        free(user_edge_types);
         return cbm_mcp_text_result("function_name is required", true);
     }
     if (!store) {
@@ -2459,6 +2532,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         free(func_name);
         free(project);
         free(direction);
+        for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+        free(user_edge_types);
         return _res;
     }
 
@@ -2467,6 +2542,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         free(func_name);
         free(project);
         free(direction);
+        for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+        free(user_edge_types);
         return not_indexed;
     }
 
@@ -2490,6 +2567,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         free(func_name);
         free(project);
         free(direction);
+        for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+        free(user_edge_types);
         cbm_store_free_nodes(nodes, 0);
         return cbm_mcp_text_result("{\"error\":\"function not found\"}", true);
     }
@@ -2501,26 +2580,42 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     yyjson_mut_obj_add_str(doc, root, "function", func_name);
     yyjson_mut_obj_add_str(doc, root, "direction", direction);
 
-    const char *edge_types[] = {"CALLS"};
-    int edge_type_count = 1;
+    /* Use user-provided edge_types or default to {"CALLS"}.
+     * user_edge_types non-NULL with count==0 means explicit empty array [] —
+     * honor it by using an empty edge list (BFS traverses nothing). */
+    const char *default_edge_types[] = {"CALLS"};
+    const char **edge_types;
+    int edge_type_count;
+    if (user_edge_types) {
+        edge_types = (const char **)user_edge_types;
+        edge_type_count = user_edge_type_count;
+    } else {
+        edge_types = default_edge_types;
+        edge_type_count = 1;
+    }
+
+    /* Determine requested directions */
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    bool want_outbound = strcmp(direction, "outbound") == 0 || strcmp(direction, "both") == 0;
+    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+    bool want_inbound = strcmp(direction, "inbound") == 0 || strcmp(direction, "both") == 0;
 
     /* Run BFS for each requested direction.
+     * Skip BFS when edge_type_count == 0 (explicit empty array []),
+     * but still emit empty arrays to preserve the response schema.
      * IMPORTANT: yyjson_mut_obj_add_str borrows pointers — we must keep
      * traversal results alive until after yy_doc_to_str serialization. */
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
-    bool do_outbound = strcmp(direction, "outbound") == 0 || strcmp(direction, "both") == 0;
-    // NOLINTNEXTLINE(readability-implicit-bool-conversion)
-    bool do_inbound = strcmp(direction, "inbound") == 0 || strcmp(direction, "both") == 0;
-
     cbm_traverse_result_t tr_out = {0};
     cbm_traverse_result_t tr_in = {0};
 
-    if (do_outbound) {
-        cbm_store_bfs(store, nodes[0].id, "outbound", edge_types, edge_type_count, depth, 100,
-                      &tr_out);
-        if (ranked && tr_out.visited_count > 1) {
-            qsort(tr_out.visited, (size_t)tr_out.visited_count, sizeof(cbm_node_hop_t),
-                  node_hop_rank_cmp);
+    if (want_outbound) {
+        if (edge_type_count > 0) {
+            cbm_store_bfs(store, nodes[0].id, "outbound", edge_types, edge_type_count, depth, 100,
+                          &tr_out);
+            if (ranked && tr_out.visited_count > 1) {
+                qsort(tr_out.visited, (size_t)tr_out.visited_count, sizeof(cbm_node_hop_t),
+                      node_hop_rank_cmp);
+            }
         }
 
         yyjson_mut_val *callees = yyjson_mut_arr(doc);
@@ -2530,12 +2625,14 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         yyjson_mut_obj_add_val(doc, root, "callees", callees);
     }
 
-    if (do_inbound) {
-        cbm_store_bfs(store, nodes[0].id, "inbound", edge_types, edge_type_count, depth, 100,
-                      &tr_in);
-        if (ranked && tr_in.visited_count > 1) {
-            qsort(tr_in.visited, (size_t)tr_in.visited_count, sizeof(cbm_node_hop_t),
-                  node_hop_rank_cmp);
+    if (want_inbound) {
+        if (edge_type_count > 0) {
+            cbm_store_bfs(store, nodes[0].id, "inbound", edge_types, edge_type_count, depth, 100,
+                          &tr_in);
+            if (ranked && tr_in.visited_count > 1) {
+                qsort(tr_in.visited, (size_t)tr_in.visited_count, sizeof(cbm_node_hop_t),
+                      node_hop_rank_cmp);
+            }
         }
 
         yyjson_mut_val *callers = yyjson_mut_arr(doc);
@@ -2561,10 +2658,10 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         yyjson_mut_obj_add_bool(doc, root, "truncated", true);
 
         int total_results = 0;
-        if (do_outbound) {
+        if (want_outbound) {
             total_results += tr_out.visited_count;
         }
-        if (do_inbound) {
+        if (want_inbound) {
             total_results += tr_in.visited_count;
         }
         yyjson_mut_obj_add_int(doc, root, "total_results", total_results);
@@ -2572,7 +2669,7 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         size_t used = 96 + strlen(func_name) + strlen(direction);
         int shown = 0;
 
-        if (do_outbound) {
+        if (want_outbound) {
             yyjson_mut_val *callees = yyjson_mut_arr(doc);
             int shown_callees = 0;
             int full_callees = 0;
@@ -2607,7 +2704,7 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
             }
         }
 
-        if (do_inbound) {
+        if (want_inbound) {
             yyjson_mut_val *callers = yyjson_mut_arr(doc);
             int shown_callers = 0;
             int full_callers = 0;
@@ -2648,10 +2745,10 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     }
 
     /* Now safe to free traversal data */
-    if (do_outbound) {
+    if (want_outbound) {
         cbm_store_traverse_free(&tr_out);
     }
-    if (do_inbound) {
+    if (want_inbound) {
         cbm_store_traverse_free(&tr_in);
     }
 
@@ -2659,6 +2756,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     free(func_name);
     free(project);
     free(direction);
+    for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+    free(user_edge_types);
 
     char *result = cbm_mcp_text_result(json, false);
     free(json);

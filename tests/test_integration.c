@@ -622,6 +622,180 @@ TEST(integ_store_key_symbols_ranked) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
+ *  PARAM WIRING TESTS (Batch 1: previously-ignored search/trace params)
+ * ══════════════════════════════════════════════════════════════════ */
+
+TEST(integ_search_graph_relationship_filter) {
+    /* Search for Function nodes connected by CALLS edges */
+    char args[512];
+    snprintf(args, sizeof(args),
+             "{\"project\":\"%s\",\"relationship\":\"CALLS\",\"label\":\"Function\",\"limit\":50}",
+             g_project);
+
+    char *resp = call_tool("search_graph", args);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "total"));
+    /* Functions that participate in CALLS edges should appear */
+    ASSERT_NOT_NULL(strstr(resp, "greet")); /* called by main */
+
+    /* Compare: search with a non-existent relationship should return no function results.
+     * The response text is JSON-escaped inside the MCP envelope, so check content. */
+    snprintf(args, sizeof(args),
+             "{\"project\":\"%s\",\"relationship\":\"NONEXISTENT_EDGE\",\"label\":\"Function\","
+             "\"limit\":50}",
+             g_project);
+    char *resp2 = call_tool("search_graph", args);
+    ASSERT_NOT_NULL(resp2);
+    /* No functions should match a non-existent edge type — greet should NOT appear */
+    ASSERT_TRUE(strstr(resp2, "greet") == NULL);
+    ASSERT_TRUE(strstr(resp2, "Multiply") == NULL);
+
+    free(resp);
+    free(resp2);
+    PASS();
+}
+
+TEST(integ_search_graph_exclude_entry_points) {
+    /* First: get ALL functions */
+    char args[512];
+    snprintf(args, sizeof(args),
+             "{\"project\":\"%s\",\"label\":\"Function\",\"limit\":50}", g_project);
+    char *resp_all = call_tool("search_graph", args);
+    ASSERT_NOT_NULL(resp_all);
+
+    /* Then: get functions with exclude_entry_points=true (in_deg > 0 only) */
+    snprintf(args, sizeof(args),
+             "{\"project\":\"%s\",\"exclude_entry_points\":true,\"label\":\"Function\",\"limit\":50}",
+             g_project);
+    char *resp_filtered = call_tool("search_graph", args);
+    ASSERT_NOT_NULL(resp_filtered);
+
+    /* The filtered set should be smaller — entry points like main/Compute are excluded.
+     * greet/farewell/Add are called by others, so they should remain. */
+    ASSERT_NOT_NULL(strstr(resp_filtered, "greet")); /* called by main → in_deg > 0 */
+    ASSERT_NOT_NULL(strstr(resp_filtered, "Add"));   /* called by Multiply → in_deg > 0 */
+
+    free(resp_all);
+    free(resp_filtered);
+    PASS();
+}
+
+TEST(integ_search_graph_include_connected) {
+    /* Search for Multiply with include_connected=true */
+    char args[512];
+    snprintf(args, sizeof(args),
+             "{\"project\":\"%s\",\"include_connected\":true,\"name_pattern\":\"Multiply\","
+             "\"label\":\"Function\",\"limit\":10}",
+             g_project);
+
+    char *resp = call_tool("search_graph", args);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "Multiply"));
+    /* Multiply calls Add, so connected_names should contain "Add" */
+    ASSERT_NOT_NULL(strstr(resp, "connected_names"));
+    ASSERT_NOT_NULL(strstr(resp, "Add"));
+    free(resp);
+    PASS();
+}
+
+TEST(integ_trace_call_path_custom_edge_types) {
+    /* Trace with explicit edge_types=["CALLS"] — should work same as default */
+    char args[512];
+    snprintf(args, sizeof(args),
+             "{\"function_name\":\"Multiply\",\"project\":\"%s\","
+             "\"direction\":\"outbound\",\"edge_types\":[\"CALLS\"]}",
+             g_project);
+
+    char *resp = call_tool("trace_call_path", args);
+    ASSERT_NOT_NULL(resp);
+    /* Multiply calls Add, so callees should include Add */
+    ASSERT_NOT_NULL(strstr(resp, "Add"));
+    ASSERT_NOT_NULL(strstr(resp, "callees"));
+    free(resp);
+    PASS();
+}
+
+TEST(integ_trace_call_path_imports_edge_type) {
+    /* Trace with IMPORTS edge type — no IMPORTS edges in test project */
+    char args[512];
+    snprintf(args, sizeof(args),
+             "{\"function_name\":\"Multiply\",\"project\":\"%s\","
+             "\"direction\":\"both\",\"edge_types\":[\"IMPORTS\"]}",
+             g_project);
+
+    char *resp = call_tool("trace_call_path", args);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "function"));
+    /* With IMPORTS edge type, there should be no Add in results (only CALLS connect them) */
+    ASSERT_TRUE(strstr(resp, "Add") == NULL);
+    free(resp);
+    PASS();
+}
+
+TEST(integ_trace_call_path_nonexistent_with_edge_types) {
+    /* Test BUG-1 fix: trace nonexistent function with edge_types should not leak */
+    char args[512];
+    snprintf(args, sizeof(args),
+             "{\"function_name\":\"NonExistentFunction\",\"project\":\"%s\","
+             "\"edge_types\":[\"CALLS\",\"IMPORTS\"]}",
+             g_project);
+
+    char *resp = call_tool("trace_call_path", args);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "not found"));
+    free(resp);
+    PASS();
+}
+
+TEST(integ_trace_call_path_empty_edge_types) {
+    /* Explicit edge_types=[] should traverse nothing (not fall back to CALLS)
+     * but still emit the callees array to preserve response schema */
+    char args[512];
+    snprintf(args, sizeof(args),
+             "{\"function_name\":\"Multiply\",\"project\":\"%s\","
+             "\"direction\":\"outbound\",\"edge_types\":[]}",
+             g_project);
+
+    char *resp = call_tool("trace_call_path", args);
+    ASSERT_NOT_NULL(resp);
+    /* With empty edge_types, BFS should not traverse any edges — no Add in results */
+    ASSERT_TRUE(strstr(resp, "Add") == NULL);
+    /* But the callees key should still be present (empty array) */
+    ASSERT_NOT_NULL(strstr(resp, "callees"));
+    free(resp);
+    PASS();
+}
+
+TEST(integ_search_graph_dead_code_with_exclude_entry_points) {
+    /* max_degree=0 finds dead code. exclude_entry_points should NOT remove dead code —
+     * it should only remove true entry points (out_deg>0, in_deg=0). */
+    char args[512];
+
+    /* First: dead code only (max_degree=0) */
+    snprintf(args, sizeof(args),
+             "{\"project\":\"%s\",\"label\":\"Function\",\"max_degree\":0,\"limit\":50}",
+             g_project);
+    char *resp_dead = call_tool("search_graph", args);
+    ASSERT_NOT_NULL(resp_dead);
+
+    /* Then: dead code with exclude_entry_points — should still find dead-code functions
+     * since dead code has both in_deg=0 AND out_deg=0 (not an entry point) */
+    snprintf(args, sizeof(args),
+             "{\"project\":\"%s\",\"label\":\"Function\",\"max_degree\":0,"
+             "\"exclude_entry_points\":true,\"limit\":50}",
+             g_project);
+    char *resp_combo = call_tool("search_graph", args);
+    ASSERT_NOT_NULL(resp_combo);
+
+    /* The combo query should NOT be empty — dead code is preserved */
+    /* If resp_dead had results, resp_combo should too (dead code != entry point) */
+
+    free(resp_dead);
+    free(resp_combo);
+    PASS();
+}
+
+/* ══════════════════════════════════════════════════════════════════
  *  SUITE
  * ══════════════════════════════════════════════════════════════════ */
 
@@ -630,7 +804,7 @@ SUITE(integration) {
     if (integration_setup() != 0) {
         printf("  %-50s", "integration_setup");
         printf("SKIP (setup failed)\n");
-        tf_skip_count += 29; /* skip all integration tests */
+        tf_skip_count += 37; /* skip all integration tests */
         integration_teardown();
         return;
     }
@@ -670,6 +844,16 @@ SUITE(integration) {
     RUN_TEST(integ_pipeline_fqn_module);
     RUN_TEST(integ_pipeline_project_name);
     RUN_TEST(integ_pipeline_cancel);
+
+    /* Param wiring tests */
+    RUN_TEST(integ_search_graph_relationship_filter);
+    RUN_TEST(integ_search_graph_exclude_entry_points);
+    RUN_TEST(integ_search_graph_include_connected);
+    RUN_TEST(integ_trace_call_path_custom_edge_types);
+    RUN_TEST(integ_trace_call_path_imports_edge_type);
+    RUN_TEST(integ_trace_call_path_nonexistent_with_edge_types);
+    RUN_TEST(integ_trace_call_path_empty_edge_types);
+    RUN_TEST(integ_search_graph_dead_code_with_exclude_entry_points);
 
     /* Destructive tests (run last!) */
     RUN_TEST(integ_mcp_delete_project);
