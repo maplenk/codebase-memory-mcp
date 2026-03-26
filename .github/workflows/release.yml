@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      soak_level:
+        description: 'Soak test level: full (quick+asan), quick (10min only), none (skip)'
+        type: choice
+        options: ['full', 'quick', 'none']
+        default: 'quick'
 
 permissions:
   contents: write
@@ -371,6 +376,11 @@ jobs:
           SUFFIX=${{ matrix.variant == 'ui' && '-ui' || '' }}
           tar -czf "/tmp/smoke-server/codebase-memory-mcp${SUFFIX}-${OS}-${ARCH}.tar.gz" \
             -C /tmp/smoke-server codebase-memory-mcp
+          # Also serve under standard name so install.sh + update --standard work
+          if [ -n "$SUFFIX" ]; then
+            cp "/tmp/smoke-server/codebase-memory-mcp${SUFFIX}-${OS}-${ARCH}.tar.gz" \
+               "/tmp/smoke-server/codebase-memory-mcp-${OS}-${ARCH}.tar.gz"
+          fi
           cd /tmp/smoke-server
           sha256sum *.tar.gz > checksums.txt 2>/dev/null || shasum -a 256 *.tar.gz > checksums.txt
           python3 -m http.server 18080 -d /tmp/smoke-server &
@@ -446,6 +456,8 @@ jobs:
           install: >-
             mingw-w64-clang-x86_64-python3
             unzip
+            zip
+            coreutils
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -466,6 +478,10 @@ jobs:
           SUFFIX=${{ matrix.variant == 'ui' && '-ui' || '' }}
           cd /tmp/smoke-server
           zip -q "codebase-memory-mcp${SUFFIX}-windows-amd64.zip" codebase-memory-mcp.exe
+          # Also serve under standard name
+          if [ -n "$SUFFIX" ]; then
+            cp "codebase-memory-mcp${SUFFIX}-windows-amd64.zip" "codebase-memory-mcp-windows-amd64.zip"
+          fi
           sha256sum *.zip > checksums.txt
           python3 -m http.server 18080 -d /tmp/smoke-server &
 
@@ -503,9 +519,183 @@ jobs:
           }
           Write-Host "=== Windows Defender: clean ==="
 
-  # ── Step 5: Create DRAFT release (not public yet) ─────────────
+  # ── Step 5a: Quick soak (parallel with smoke, per-platform) ────
+  soak-quick:
+    if: ${{ inputs.soak_level != 'none' }}
+    needs: [build-unix]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            cc: gcc
+            cxx: g++
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            cc: gcc
+            cxx: g++
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+            cc: cc
+            cxx: c++
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            cc: cc
+            cxx: c++
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install deps (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev python3 git
+      - name: Build (release mode)
+        run: scripts/build.sh --version ${{ inputs.version }} CC=${{ matrix.cc }} CXX=${{ matrix.cxx }}
+      - name: Quick soak (10 min)
+        run: scripts/soak-test.sh build/c/codebase-memory-mcp 10
+      - name: Upload soak metrics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: soak-quick-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: soak-results/
+          retention-days: 14
+
+  # ── Step 5a-win: Quick soak (Windows, separate job) ─────────────
+  soak-quick-windows:
+    if: ${{ inputs.soak_level != 'none' }}
+    needs: [build-windows]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: msys2/setup-msys2@4f806de0a5a7294ffabaff804b38a9b435a73bda # v2
+        with:
+          msystem: CLANG64
+          path-type: inherit
+          install: >-
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-zlib
+            mingw-w64-clang-x86_64-python3
+            make
+            git
+            coreutils
+      - name: Build (release mode)
+        shell: msys2 {0}
+        run: scripts/build.sh --version ${{ inputs.version }} CC=clang CXX=clang++
+      - name: Quick soak (10 min)
+        shell: msys2 {0}
+        run: |
+          BIN=build/c/codebase-memory-mcp
+          [ -f "${BIN}.exe" ] && BIN="${BIN}.exe"
+          scripts/soak-test.sh "$BIN" 10
+      - name: Upload soak metrics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: soak-quick-windows-amd64
+          path: soak-results/
+          retention-days: 14
+
+  # ── Step 5b: ASan soak (Linux + macOS, parallel with smoke) ────
+  soak-asan:
+    if: ${{ inputs.soak_level == 'full' }}
+    needs: [build-unix]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            cc: gcc
+            cxx: g++
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            cc: gcc
+            cxx: g++
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+            cc: cc
+            cxx: c++
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            cc: cc
+            cxx: c++
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install deps (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev python3 git
+      - name: Build (ASan + LeakSanitizer)
+        run: |
+          SANITIZE="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          scripts/build.sh --version ${{ inputs.version }} CC=${{ matrix.cc }} CXX=${{ matrix.cxx }} EXTRA_CFLAGS="$SANITIZE" EXTRA_LDFLAGS="$SANITIZE"
+      - name: ASan soak (15 min)
+        env:
+          ASAN_OPTIONS: "detect_leaks=1:halt_on_error=0:log_path=soak-results/asan"
+        run: scripts/soak-test.sh build/c/codebase-memory-mcp 15
+      - name: Upload ASan soak metrics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: soak-asan-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: soak-results/
+          retention-days: 14
+
+  soak-asan-windows:
+    if: ${{ inputs.soak_level == 'full' }}
+    needs: [build-windows]
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: msys2/setup-msys2@4f806de0a5a7294ffabaff804b38a9b435a73bda # v2
+        with:
+          msystem: CLANG64
+          path-type: inherit
+          install: >-
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-zlib
+            mingw-w64-clang-x86_64-python3
+            make
+            git
+            coreutils
+      - name: Build (ASan, no LeakSan on Windows)
+        shell: msys2 {0}
+        run: |
+          SANITIZE="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          scripts/build.sh --version ${{ inputs.version }} CC=clang CXX=clang++ EXTRA_CFLAGS="$SANITIZE" EXTRA_LDFLAGS="$SANITIZE"
+      - name: ASan soak (15 min, no leak detection)
+        shell: msys2 {0}
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=0:log_path=soak-results/asan"
+        run: |
+          BIN=build/c/codebase-memory-mcp
+          [ -f "${BIN}.exe" ] && BIN="${BIN}.exe"
+          scripts/soak-test.sh "$BIN" 15
+      - name: Upload ASan soak metrics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: soak-asan-windows-amd64
+          path: soak-results/
+          retention-days: 14
+
+  # ── Step 6: Create DRAFT release (not public yet) ─────────────
   release-draft:
-    needs: [smoke-unix, smoke-windows, security-static, codeql-gate]
+    needs: [smoke-unix, smoke-windows, security-static, codeql-gate, soak-quick, soak-quick-windows]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

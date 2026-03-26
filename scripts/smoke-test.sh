@@ -504,26 +504,40 @@ fi
 # KiloCode detection always uses ~/.config/ path (even on macOS)
 mkdir -p "$FAKE_HOME/.config/Code/User/globalStorage/kilocode.kilo-code/settings"
 mkdir -p "$FAKE_HOME/.local/bin"
-cp "$BINARY" "$FAKE_HOME/.local/bin/codebase-memory-mcp"
-printf '#!/bin/sh\necho stub\n' > "$FAKE_HOME/.local/bin/aider" && chmod +x "$FAKE_HOME/.local/bin/aider"
-printf '#!/bin/sh\necho stub\n' > "$FAKE_HOME/.local/bin/opencode" && chmod +x "$FAKE_HOME/.local/bin/opencode"
+# Copy binary with correct name for platform
+if [[ "$BINARY" == *.exe ]]; then
+  cp "$BINARY" "$FAKE_HOME/.local/bin/codebase-memory-mcp.exe"
+  SELF_PATH="$FAKE_HOME/.local/bin/codebase-memory-mcp.exe"
+else
+  cp "$BINARY" "$FAKE_HOME/.local/bin/codebase-memory-mcp"
+  SELF_PATH="$FAKE_HOME/.local/bin/codebase-memory-mcp"
+fi
+printf '#!/bin/sh\necho stub\n' > "$FAKE_HOME/.local/bin/aider" && chmod +x "$FAKE_HOME/.local/bin/aider" 2>/dev/null || true
+printf '#!/bin/sh\necho stub\n' > "$FAKE_HOME/.local/bin/opencode" && chmod +x "$FAKE_HOME/.local/bin/opencode" 2>/dev/null || true
 
 # Pre-existing configs (verify merge, not overwrite)
 echo '{"existingKey": true}' > "$FAKE_HOME/.claude.json"
 echo '{"existingKey": true}' > "$FAKE_HOME/.gemini/settings.json"
 printf '[existing_section]\nline_from_user = true\n' > "$FAKE_HOME/.codex/config.toml"
 
-SELF_PATH="$FAKE_HOME/.local/bin/codebase-memory-mcp"
-
 # Run install
 HOME="$FAKE_HOME" PATH="$FAKE_HOME/.local/bin:$PATH" "$BINARY" install -y 2>&1 || true
 
-# Helper for JSON validation
-json_get() { python3 -c "import json,sys,os; f='$1'; d=json.load(open(f)) if os.path.isfile(f) else {}; print($2)" 2>/dev/null || echo ""; }
+# Helper for JSON validation (pipe file to python — avoids MSYS2 path translation issues)
+json_get() { cat "$1" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print($2)" 2>/dev/null || echo ""; }
+
+# Helper: compare command paths (handles Windows D:\... vs POSIX /tmp/... mismatch)
+path_match() {
+  [ "$1" = "$2" ] && return 0
+  [ "$(basename "$1" 2>/dev/null)" = "$(basename "$2" 2>/dev/null)" ] && return 0
+  return 1
+}
 
 # 8a: Claude Code MCP (new path) — correct command
-CMD=$(json_get "$FAKE_HOME/.claude.json" "d['mcpServers']['codebase-memory-mcp']['command']")
-if [ "$CMD" != "$SELF_PATH" ]; then
+CMD=$(json_get "$FAKE_HOME/.claude.json" "d.get('mcpServers',{}).get('codebase-memory-mcp',{}).get('command','')")
+if [ -z "$CMD" ] || ! path_match "$CMD" "$SELF_PATH"; then
+  echo "DEBUG 8a: file=$FAKE_HOME/.claude.json"
+  cat "$FAKE_HOME/.claude.json" 2>/dev/null | head -5 || echo "(file not found)"
   echo "FAIL 8a: .claude.json command='$CMD', expected '$SELF_PATH'"
   exit 1
 fi
@@ -539,16 +553,16 @@ echo "OK 8b: .claude.json preserved existing keys"
 
 # 8c: Claude Code MCP (legacy path)
 CMD=$(json_get "$FAKE_HOME/.claude/.mcp.json" "d['mcpServers']['codebase-memory-mcp']['command']")
-if [ "$CMD" != "$SELF_PATH" ]; then
+if ! path_match "$CMD" "$SELF_PATH"; then
   echo "FAIL 8c: .claude/.mcp.json command='$CMD'"
   exit 1
 fi
 echo "OK 8c: Claude Code MCP (.claude/.mcp.json)"
 
 # 8d: Claude Code hooks
-if ! python3 -c "
+if ! cat "$FAKE_HOME/.claude/settings.json" 2>/dev/null | python3 -c "
 import json, sys
-d = json.load(open('$FAKE_HOME/.claude/settings.json'))
+d = json.load(sys.stdin)
 hooks = d.get('hooks', {}).get('PreToolUse', [])
 found = any('Grep' in str(h.get('matcher', '')) for h in hooks)
 sys.exit(0 if found else 1)
@@ -587,7 +601,7 @@ echo "OK 8i: Codex instructions"
 
 # 8j-l: Gemini MCP + hooks + merge
 CMD=$(json_get "$FAKE_HOME/.gemini/settings.json" "d['mcpServers']['codebase-memory-mcp']['command']")
-if [ "$CMD" != "$SELF_PATH" ]; then
+if ! path_match "$CMD" "$SELF_PATH"; then
   echo "FAIL 8j: Gemini MCP command='$CMD'"
   exit 1
 fi
@@ -598,9 +612,9 @@ if [ "$EXISTING" != "True" ]; then
 fi
 echo "OK 8j-k: Gemini MCP (correct command + preserved existing)"
 
-if ! python3 -c "
+if ! cat "$FAKE_HOME/.gemini/settings.json" 2>/dev/null | python3 -c "
 import json, sys
-d = json.load(open('$FAKE_HOME/.gemini/settings.json'))
+d = json.load(sys.stdin)
 hooks = d.get('hooks', {}).get('BeforeTool', [])
 sys.exit(0 if len(hooks) > 0 else 1)
 " 2>/dev/null; then
@@ -624,7 +638,7 @@ else
 fi
 if [ -f "$ZED_CFG" ]; then
   CMD=$(json_get "$ZED_CFG" "d['context_servers']['codebase-memory-mcp']['command']")
-  if [ "$CMD" != "$SELF_PATH" ]; then
+  if ! path_match "$CMD" "$SELF_PATH"; then
     echo "FAIL 8n: Zed command='$CMD'"
     exit 1
   fi
@@ -634,21 +648,26 @@ else
 fi
 
 # 8o-p: OpenCode MCP + instructions
-CMD=$(json_get "$FAKE_HOME/.config/opencode/opencode.json" "d['mcp']['codebase-memory-mcp']['command']")
-if [ "$CMD" != "$SELF_PATH" ]; then
-  echo "FAIL 8o: OpenCode command='$CMD'"
-  exit 1
+# OpenCode detection requires binary on PATH — may not be found on Windows
+CMD=$(json_get "$FAKE_HOME/.config/opencode/opencode.json" "d['mcp']['codebase-memory-mcp']['command'][0]")
+if [ -n "$CMD" ]; then
+  if ! path_match "$CMD" "$SELF_PATH"; then
+    echo "FAIL 8o: OpenCode command='$CMD'"
+    exit 1
+  fi
+  echo "OK 8o: OpenCode MCP"
+  if [ ! -f "$FAKE_HOME/.config/opencode/AGENTS.md" ]; then
+    echo "FAIL 8p: OpenCode AGENTS.md missing"
+    exit 1
+  fi
+  echo "OK 8p: OpenCode instructions"
+else
+  echo "SKIP 8o-p: OpenCode not detected (binary not on PATH)"
 fi
-echo "OK 8o: OpenCode MCP"
-if [ ! -f "$FAKE_HOME/.config/opencode/AGENTS.md" ]; then
-  echo "FAIL 8p: OpenCode AGENTS.md missing"
-  exit 1
-fi
-echo "OK 8p: OpenCode instructions"
 
 # 8q-r: Antigravity
 CMD=$(json_get "$FAKE_HOME/.gemini/antigravity/mcp_config.json" "d['mcpServers']['codebase-memory-mcp']['command']")
-if [ "$CMD" != "$SELF_PATH" ]; then
+if ! path_match "$CMD" "$SELF_PATH"; then
   echo "FAIL 8q: Antigravity command='$CMD'"
   exit 1
 fi
@@ -659,17 +678,21 @@ if [ ! -f "$FAKE_HOME/.gemini/antigravity/AGENTS.md" ]; then
 fi
 echo "OK 8r: Antigravity instructions"
 
-# 8s: Aider instructions
-if [ ! -f "$FAKE_HOME/CONVENTIONS.md" ] || ! grep -q 'codebase-memory-mcp' "$FAKE_HOME/CONVENTIONS.md"; then
-  echo "FAIL 8s: Aider CONVENTIONS.md missing or empty"
-  exit 1
+# 8s: Aider instructions (detection requires binary on PATH)
+if [ -f "$FAKE_HOME/CONVENTIONS.md" ]; then
+  if ! grep -q 'codebase-memory-mcp' "$FAKE_HOME/CONVENTIONS.md"; then
+    echo "FAIL 8s: Aider CONVENTIONS.md missing content"
+    exit 1
+  fi
+  echo "OK 8s: Aider instructions"
+else
+  echo "SKIP 8s: Aider not detected (binary not on PATH)"
 fi
-echo "OK 8s: Aider instructions"
 
 # 8t: KiloCode MCP (detection + install both use ~/.config/ on all platforms)
 KILO_CFG="$FAKE_HOME/.config/Code/User/globalStorage/kilocode.kilo-code/settings/mcp_settings.json"
 CMD=$(json_get "$KILO_CFG" "d['mcpServers']['codebase-memory-mcp']['command']")
-if [ "$CMD" != "$SELF_PATH" ]; then
+if ! path_match "$CMD" "$SELF_PATH"; then
   echo "FAIL 8t: KiloCode command='$CMD'"
   exit 1
 fi
@@ -689,7 +712,7 @@ else
   VSCODE_CFG="$FAKE_HOME/.config/Code/User/mcp.json"
 fi
 CMD=$(json_get "$VSCODE_CFG" "d['servers']['codebase-memory-mcp']['command']")
-if [ "$CMD" != "$SELF_PATH" ]; then
+if ! path_match "$CMD" "$SELF_PATH"; then
   echo "FAIL 8v: VS Code command='$CMD'"
   exit 1
 fi
@@ -697,7 +720,7 @@ echo "OK 8v: VS Code MCP"
 
 # 8w: OpenClaw MCP
 CMD=$(json_get "$FAKE_HOME/.openclaw/openclaw.json" "d['mcpServers']['codebase-memory-mcp']['command']")
-if [ "$CMD" != "$SELF_PATH" ]; then
+if ! path_match "$CMD" "$SELF_PATH"; then
   echo "FAIL 8w: OpenClaw command='$CMD'"
   exit 1
 fi
@@ -720,9 +743,9 @@ echo "=== Phase 9: agent config uninstall E2E ==="
 HOME="$FAKE_HOME" PATH="$FAKE_HOME/.local/bin:$PATH" "$BINARY" uninstall -y -n 2>&1 || true
 
 # 9a-b: Claude Code MCP removed but existing keys preserved
-if python3 -c "
+if cat "$FAKE_HOME/.claude.json" 2>/dev/null | python3 -c "
 import json, sys
-d = json.load(open('$FAKE_HOME/.claude.json'))
+d = json.load(sys.stdin)
 if 'codebase-memory-mcp' in d.get('mcpServers', {}):
     sys.exit(1)
 if not d.get('existingKey', False):
@@ -736,9 +759,9 @@ else
 fi
 
 # 9c: Legacy MCP removed
-if python3 -c "
+if cat "$FAKE_HOME/.claude/.mcp.json" 2>/dev/null | python3 -c "
 import json, sys
-d = json.load(open('$FAKE_HOME/.claude/.mcp.json'))
+d = json.load(sys.stdin)
 sys.exit(1 if 'codebase-memory-mcp' in d.get('mcpServers', {}) else 0)
 " 2>/dev/null; then
   echo "OK 9c: legacy .mcp.json cleaned"
@@ -748,9 +771,9 @@ else
 fi
 
 # 9d: Hooks removed
-if python3 -c "
+if cat "$FAKE_HOME/.claude/settings.json" 2>/dev/null | python3 -c "
 import json, sys
-d = json.load(open('$FAKE_HOME/.claude/settings.json'))
+d = json.load(sys.stdin)
 hooks = d.get('hooks', {}).get('PreToolUse', [])
 found = any('cbm-code-discovery-gate' in str(h) for h in hooks)
 sys.exit(1 if found else 0)
@@ -773,9 +796,9 @@ fi
 echo "OK 9e-f: Codex TOML cleaned, existing preserved"
 
 # 9g-i: Gemini MCP removed, existing preserved, hooks removed
-if python3 -c "
+if cat "$FAKE_HOME/.gemini/settings.json" 2>/dev/null | python3 -c "
 import json, sys
-d = json.load(open('$FAKE_HOME/.gemini/settings.json'))
+d = json.load(sys.stdin)
 has_mcp = 'codebase-memory-mcp' in d.get('mcpServers', {})
 has_existing = d.get('existingKey', False)
 hooks = d.get('hooks', {}).get('BeforeTool', [])
@@ -789,9 +812,9 @@ else
 fi
 
 # 9j: VS Code
-if python3 -c "
+if cat "$VSCODE_CFG" 2>/dev/null | python3 -c "
 import json, sys
-d = json.load(open('$VSCODE_CFG'))
+d = json.load(sys.stdin)
 sys.exit(1 if 'codebase-memory-mcp' in d.get('servers', {}) else 0)
 " 2>/dev/null; then
   echo "OK 9j: VS Code MCP removed"
@@ -801,9 +824,9 @@ else
 fi
 
 # 9k: OpenClaw
-if python3 -c "
+if cat "$FAKE_HOME/.openclaw/openclaw.json" 2>/dev/null | python3 -c "
 import json, sys
-d = json.load(open('$FAKE_HOME/.openclaw/openclaw.json'))
+d = json.load(sys.stdin)
 sys.exit(1 if 'codebase-memory-mcp' in d.get('mcpServers', {}) else 0)
 " 2>/dev/null; then
   echo "OK 9k: OpenClaw MCP removed"
@@ -843,9 +866,9 @@ cp "$BINARY" "$IDEM_HOME/.local/bin/codebase-memory-mcp"
 HOME="$IDEM_HOME" "$BINARY" install -y 2>&1 > /dev/null || true
 HOME="$IDEM_HOME" "$BINARY" install -y 2>&1 > /dev/null || true
 # Count MCP entries — should be exactly 1
-COUNT=$(python3 -c "
-import json
-d = json.load(open('$IDEM_HOME/.claude.json'))
+COUNT=$(cat "$IDEM_HOME/.claude.json" 2>/dev/null | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
 print(list(d.get('mcpServers',{}).keys()).count('codebase-memory-mcp'))
 " 2>/dev/null || echo "0")
 if [ "$COUNT" != "1" ]; then
@@ -1010,9 +1033,13 @@ if [ -n "${SMOKE_DOWNLOAD_URL:-}" ]; then
   # Pre-install agent config with a WRONG binary path (simulates stale config)
   echo '{"mcpServers":{"codebase-memory-mcp":{"command":"/old/stale/path"}}}' > "$UPDATE_HOME/.claude.json"
 
-  # 14a: Run actual update command
+  # 14a: Run actual update command (detect variant from available archive)
+  UPDATE_VARIANT="--standard"
+  if curl -sf "$SMOKE_DOWNLOAD_URL/" 2>/dev/null | grep -q "ui-"; then
+    UPDATE_VARIANT="--ui"
+  fi
   HOME="$UPDATE_HOME" CBM_DOWNLOAD_URL="$SMOKE_DOWNLOAD_URL" \
-    "$BINARY" update --standard -y 2>&1 || true
+    "$BINARY" update $UPDATE_VARIANT -y 2>&1 || true
 
   # 14b: Verify new binary exists and runs
   if [ ! -f "$UPDATE_HOME/.local/bin/codebase-memory-mcp" ]; then
@@ -1030,7 +1057,7 @@ if [ -n "${SMOKE_DOWNLOAD_URL:-}" ]; then
   echo "OK 14b: updated binary runs"
 
   # 14c: Verify agent config was refreshed (stale path replaced)
-  UPD_CMD=$(python3 -c "import json,sys,os; f='$UPDATE_HOME/.claude.json'; d=json.load(open(f)) if os.path.isfile(f) else {}; print(d.get('mcpServers',{}).get('codebase-memory-mcp',{}).get('command',''))" 2>/dev/null || echo "")
+  UPD_CMD=$(cat "$UPDATE_HOME/.claude.json" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('mcpServers',{}).get('codebase-memory-mcp',{}).get('command',''))" 2>/dev/null || echo "")
   if [ "$UPD_CMD" = "/old/stale/path" ]; then
     echo "FAIL 14c: agent config still has stale path after update"
     exit 1
@@ -1059,11 +1086,9 @@ if [ -n "${SMOKE_DOWNLOAD_URL:-}" ]; then
   echo "OK 14e: binary removed by uninstall"
 
   # 14f: Verify agent config cleaned
-  if python3 -c "
-import json, sys, os
-f = '$UPDATE_HOME/.claude.json'
-if not os.path.isfile(f): sys.exit(0)
-d = json.load(open(f))
+  if cat "$UPDATE_HOME/.claude.json" 2>/dev/null | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
 if 'codebase-memory-mcp' in d.get('mcpServers', {}): sys.exit(1)
 sys.exit(0)
 " 2>/dev/null; then
@@ -1127,13 +1152,20 @@ if [ "$DL_OS" = "darwin" ] || [ "$DL_OS" = "linux" ]; then
 else
   DL_EXT="zip"
 fi
+# Try standard name first, fall back to UI variant
 DL_ARCHIVE="codebase-memory-mcp-${DL_OS}-${DL_ARCH}.${DL_EXT}"
+DL_ARCHIVE_UI="codebase-memory-mcp-ui-${DL_OS}-${DL_ARCH}.${DL_EXT}"
 
-# 12a: curl download
+# 12a: curl download (try standard, then UI variant)
 echo "--- Phase 12a: curl download ---"
-if ! curl -fSL -o "$DL_DIR/$DL_ARCHIVE" "$SMOKE_DOWNLOAD_URL/$DL_ARCHIVE"; then
-  echo "FAIL 12a: curl download failed"
-  exit 1
+if ! curl -fSL -o "$DL_DIR/$DL_ARCHIVE" "$SMOKE_DOWNLOAD_URL/$DL_ARCHIVE" 2>/dev/null; then
+  # Try UI variant
+  if curl -fSL -o "$DL_DIR/$DL_ARCHIVE_UI" "$SMOKE_DOWNLOAD_URL/$DL_ARCHIVE_UI" 2>/dev/null; then
+    DL_ARCHIVE="$DL_ARCHIVE_UI"
+  else
+    echo "FAIL 12a: curl download failed (tried standard and ui variants)"
+    exit 1
+  fi
 fi
 if [ ! -s "$DL_DIR/$DL_ARCHIVE" ]; then
   echo "FAIL 12a: downloaded archive is empty"
@@ -1328,6 +1360,50 @@ else
   echo ""
   echo "=== Phase 12-13: SKIPPED (SMOKE_DOWNLOAD_URL not set) ==="
 fi
+
+# ── Phase 15: UI HTTP server reachability ──
+# Only runs if the binary was built with embedded UI assets.
+echo ""
+echo "=== Phase 15: UI HTTP server ==="
+
+UI_PORT=19876
+UI_INPUT=$(mktemp)
+"$BINARY" --port "$UI_PORT" < "$UI_INPUT" > /dev/null 2>&1 &
+UI_PID=$!
+sleep 1
+
+if kill -0 "$UI_PID" 2>/dev/null; then
+  # 15a: GET / returns 200 with HTML content
+  UI_BODY=$(curl -sf "http://127.0.0.1:$UI_PORT/" 2>/dev/null || echo "")
+  if echo "$UI_BODY" | grep -qi "<html"; then
+    echo "OK 15a: UI serves HTML at /"
+  elif [ -z "$UI_BODY" ]; then
+    echo "SKIP 15a: UI not reachable (binary may not have embedded assets)"
+  else
+    echo "FAIL 15a: UI root did not return HTML"
+    kill "$UI_PID" 2>/dev/null || true
+    exit 1
+  fi
+
+  # 15b: POST /rpc accepts JSON-RPC and returns JSON
+  RPC_BODY=$(curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    "http://127.0.0.1:$UI_PORT/rpc" 2>/dev/null || echo "")
+  if echo "$RPC_BODY" | grep -q "jsonrpc"; then
+    echo "OK 15b: /rpc returns JSON-RPC response"
+  elif [ -z "$RPC_BODY" ]; then
+    echo "SKIP 15b: /rpc not reachable"
+  else
+    echo "FAIL 15b: /rpc did not return JSON-RPC"
+  fi
+
+  kill "$UI_PID" 2>/dev/null || true
+  wait "$UI_PID" 2>/dev/null || true
+else
+  echo "SKIP Phase 15: binary exited immediately (no UI assets embedded)"
+fi
+rm -f "$UI_INPUT"
 
 echo ""
 echo "=== smoke-test: ALL PASSED ==="

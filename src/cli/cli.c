@@ -1314,7 +1314,11 @@ int cbm_upsert_opencode_mcp(const char *binary_path, const char *config_path) {
     yyjson_mut_obj_remove_key(mcp, "codebase-memory-mcp");
 
     yyjson_mut_val *entry = yyjson_mut_obj(mdoc);
-    yyjson_mut_obj_add_str(mdoc, entry, "command", binary_path);
+    yyjson_mut_obj_add_bool(mdoc, entry, "enabled", true);
+    yyjson_mut_obj_add_str(mdoc, entry, "type", "local");
+    yyjson_mut_val *cmd_arr = yyjson_mut_arr(mdoc);
+    yyjson_mut_arr_add_str(mdoc, cmd_arr, binary_path);
+    yyjson_mut_obj_add_val(mdoc, entry, "command", cmd_arr);
     yyjson_mut_obj_add_val(mdoc, mcp, "codebase-memory-mcp", entry);
 
     int rc = write_json_file(config_path, mdoc);
@@ -2268,7 +2272,12 @@ static int cbm_macos_adhoc_sign(const char *binary_path) {
 
 static int cbm_kill_other_instances(void) {
 #ifdef _WIN32
-    const char *argv[] = {"taskkill", "/IM", "codebase-memory-mcp.exe", "/F", NULL};
+    /* taskkill /IM kills ALL matching processes INCLUDING self.
+     * Use /FI filter to exclude our own PID. */
+    char pid_filter[64];
+    snprintf(pid_filter, sizeof(pid_filter), "PID ne %lu", (unsigned long)GetCurrentProcessId());
+    const char *argv[] = {"taskkill", "/F",       "/FI", "IMAGENAME eq codebase-memory-mcp.exe",
+                          "/FI",      pid_filter, NULL};
     (void)cbm_exec_no_shell(argv);
     return 0;
 #else
@@ -2682,7 +2691,11 @@ int cbm_cmd_install(int argc, char **argv) {
 
     /* Step 2: Binary path */
     char self_path[1024];
+#ifdef _WIN32
+    snprintf(self_path, sizeof(self_path), "%s/.local/bin/codebase-memory-mcp.exe", home);
+#else
     snprintf(self_path, sizeof(self_path), "%s/.local/bin/codebase-memory-mcp", home);
+#endif
 
     /* Step 3: Install/refresh all agent configs */
     cbm_install_agent_configs(home, self_path, force, dry_run);
@@ -2921,7 +2934,11 @@ int cbm_cmd_uninstall(int argc, char **argv) {
 
     /* Step 3: Remove binary */
     char bin_path[1024];
+#ifdef _WIN32
+    snprintf(bin_path, sizeof(bin_path), "%s/.local/bin/codebase-memory-mcp.exe", home);
+#else
     snprintf(bin_path, sizeof(bin_path), "%s/.local/bin/codebase-memory-mcp", home);
+#endif
     struct stat st;
     if (stat(bin_path, &st) == 0) {
         if (!dry_run) {
@@ -3103,7 +3120,11 @@ int cbm_cmd_update(int argc, char **argv) {
 
     /* Step 5: Extract binary */
     char bin_dest[1024];
+#ifdef _WIN32
+    snprintf(bin_dest, sizeof(bin_dest), "%s/.local/bin/codebase-memory-mcp.exe", home);
+#else
     snprintf(bin_dest, sizeof(bin_dest), "%s/.local/bin/codebase-memory-mcp", home);
+#endif
 
     /* Ensure install directory exists */
     char bin_dir[1024];
