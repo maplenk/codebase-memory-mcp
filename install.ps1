@@ -1,14 +1,14 @@
 # install.ps1 — One-line installer for codebase-memory-mcp (Windows).
 #
 # Usage:
-#   powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.ps1 | iex"
+#   powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/maplenk/codebase-memory-mcp/main/install.ps1 | iex"
 #
 # Environment:
 #   CBM_DOWNLOAD_URL  Override base URL for downloads (for testing)
 
 $ErrorActionPreference = "Stop"
 
-$Repo = "DeusData/codebase-memory-mcp"
+$Repo = "maplenk/codebase-memory-mcp"
 $InstallDir = "$env:LOCALAPPDATA\Programs\codebase-memory-mcp"
 $BinName = "codebase-memory-mcp.exe"
 $BaseUrl = if ($env:CBM_DOWNLOAD_URL) { $env:CBM_DOWNLOAD_URL } else { "https://github.com/$Repo/releases/latest/download" }

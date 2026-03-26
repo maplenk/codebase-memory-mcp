@@ -740,7 +740,7 @@ jobs:
             'dataLicense': 'CC0-1.0',
             'SPDXID': 'SPDXRef-DOCUMENT',
             'name': 'codebase-memory-mcp-${{ inputs.version }}',
-            'documentNamespace': 'https://github.com/DeusData/codebase-memory-mcp/releases/${{ inputs.version }}',
+            'documentNamespace': 'https://github.com/maplenk/codebase-memory-mcp/releases/${{ inputs.version }}',
             'creationInfo': {
               'created': '$(date -u +%Y-%m-%dT%H:%M:%SZ)',
               'creators': ['Tool: codebase-memory-mcp-release-pipeline']
@@ -962,7 +962,7 @@ jobs:
       # Fetch public score and block release if repo health degrades below threshold.
       - name: OpenSSF Scorecard gate (minimum 4.0)
         run: |
-          SCORE=$(curl -sf "https://api.scorecard.dev/projects/github.com/DeusData/codebase-memory-mcp" 2>/dev/null \
+          SCORE=$(curl -sf "https://api.scorecard.dev/projects/github.com/maplenk/codebase-memory-mcp" 2>/dev/null \
             | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('score',0))" 2>/dev/null \
             || echo "0")
           echo "OpenSSF Scorecard: $SCORE/10"
@@ -970,7 +970,7 @@ jobs:
             echo "=== Scorecard gate passed (>= 4.0) ==="
           else
             echo "BLOCKED: Scorecard $SCORE/10 is below minimum 4.0"
-            echo "Check https://scorecard.dev/viewer/?uri=github.com/DeusData/codebase-memory-mcp"
+            echo "Check https://scorecard.dev/viewer/?uri=github.com/maplenk/codebase-memory-mcp"
             exit 1
           fi
 
@@ -1003,7 +1003,7 @@ jobs:
 
           # Build provenance
           REPORT+=$'**Build Provenance (SLSA)** — cryptographic proof each binary was built by GitHub Actions from this repo:\n'
-          REPORT+=$'```\ngh attestation verify <downloaded-file> --repo DeusData/codebase-memory-mcp\n```\n\n'
+          REPORT+=$'```\ngh attestation verify <downloaded-file> --repo maplenk/codebase-memory-mcp\n```\n\n'
 
           # Cosign
           REPORT+=$'**Sigstore cosign** — keyless signature verification:\n'
@@ -1018,7 +1018,7 @@ jobs:
           # SBOM
           REPORT+=$'**SBOM** — Software Bill of Materials (`sbom.json`) lists all vendored dependencies.\n\n'
 
-          REPORT+=$'See [SECURITY.md](https://github.com/DeusData/codebase-memory-mcp/blob/main/SECURITY.md) for full details.\n'
+          REPORT+=$'See [SECURITY.md](https://github.com/maplenk/codebase-memory-mcp/blob/main/SECURITY.md) for full details.\n'
 
           # Append to release notes
           EXISTING=$(gh release view "$VERSION" --json body --jq '.body' --repo "$GITHUB_REPOSITORY")

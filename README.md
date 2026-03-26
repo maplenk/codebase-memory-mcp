@@ -1,13 +1,13 @@
 # codebase-memory-mcp
 
-[![GitHub Release](https://img.shields.io/github/v/release/DeusData/codebase-memory-mcp?style=flat&color=blue)](https://github.com/DeusData/codebase-memory-mcp/releases/latest)
+[![GitHub Release](https://img.shields.io/github/v/release/maplenk/codebase-memory-mcp?style=flat&color=blue)](https://github.com/maplenk/codebase-memory-mcp/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/DeusData/codebase-memory-mcp/dry-run.yml?label=CI)](https://github.com/DeusData/codebase-memory-mcp/actions/workflows/dry-run.yml)
-[![Tests](https://img.shields.io/badge/tests-2042_passing-brightgreen)](https://github.com/DeusData/codebase-memory-mcp)
-[![Languages](https://img.shields.io/badge/languages-66-orange)](https://github.com/DeusData/codebase-memory-mcp)
-[![Agents](https://img.shields.io/badge/agents-10-purple)](https://github.com/DeusData/codebase-memory-mcp)
-[![Pure C](https://img.shields.io/badge/pure_C-zero_dependencies-blue)](https://github.com/DeusData/codebase-memory-mcp)
-[![Platform](https://img.shields.io/badge/macOS_%7C_Linux_%7C_Windows-supported-lightgrey)](https://github.com/DeusData/codebase-memory-mcp/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/maplenk/codebase-memory-mcp/dry-run.yml?label=CI)](https://github.com/maplenk/codebase-memory-mcp/actions/workflows/dry-run.yml)
+[![Tests](https://img.shields.io/badge/tests-2657_passing-brightgreen)](https://github.com/maplenk/codebase-memory-mcp)
+[![Languages](https://img.shields.io/badge/languages-66-orange)](https://github.com/maplenk/codebase-memory-mcp)
+[![Agents](https://img.shields.io/badge/agents-10-purple)](https://github.com/maplenk/codebase-memory-mcp)
+[![Pure C](https://img.shields.io/badge/pure_C-zero_dependencies-blue)](https://github.com/maplenk/codebase-memory-mcp)
+[![Platform](https://img.shields.io/badge/macOS_%7C_Linux_%7C_Windows-supported-lightgrey)](https://github.com/maplenk/codebase-memory-mcp/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/DeusData/codebase-memory-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/DeusData/codebase-memory-mcp)
 
 **The fastest and most efficient code intelligence engine for AI coding agents.** Full-indexes an average repository in milliseconds, the Linux kernel (28M LOC, 75K files) in 3 minutes. Answers structural queries in under 1ms. Ships as a single static binary for macOS, Linux, and Windows — download, run `install`, done.
@@ -122,17 +122,17 @@ All features in this fork were developed with [OpenAI Codex](https://openai.com/
 
 **One-line install** (macOS / Linux):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/maplenk/codebase-memory-mcp/main/install.sh | bash
 ```
 
 With graph visualization UI:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash -s -- --ui
+curl -fsSL https://raw.githubusercontent.com/maplenk/codebase-memory-mcp/main/install.sh | bash -s -- --ui
 ```
 
 **Windows** (PowerShell):
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/maplenk/codebase-memory-mcp/main/install.ps1 | iex"
 ```
 
 Restart your coding agent. Say **"Index this project"** — done.
@@ -140,7 +140,7 @@ Restart your coding agent. Say **"Index this project"** — done.
 <details>
 <summary>Manual install</summary>
 
-1. **Download** the binary for your platform from the [latest release](https://github.com/DeusData/codebase-memory-mcp/releases/latest):
+1. **Download** the binary for your platform from the [latest release](https://github.com/maplenk/codebase-memory-mcp/releases/latest):
    - `codebase-memory-mcp-<os>-<arch>.tar.gz` — standard (MCP server only)
    - `codebase-memory-mcp-ui-<os>-<arch>.tar.gz` — with embedded graph visualization
 
@@ -271,13 +271,13 @@ Every release includes `checksums.txt` with SHA-256 hashes. All binaries are sta
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/scripts/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/maplenk/codebase-memory-mcp/main/scripts/setup.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/scripts/setup-windows.ps1 | iex
+irm https://raw.githubusercontent.com/maplenk/codebase-memory-mcp/main/scripts/setup-windows.ps1 | iex
 ```
 
 </details>
@@ -285,7 +285,7 @@ irm https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/scripts/
 ### Install via Claude Code
 
 ```
-You: "Install this MCP server: https://github.com/DeusData/codebase-memory-mcp"
+You: "Install this MCP server: https://github.com/maplenk/codebase-memory-mcp"
 ```
 
 ### Build from Source
@@ -303,7 +303,7 @@ You: "Install this MCP server: https://github.com/DeusData/codebase-memory-mcp"
 </details>
 
 ```bash
-git clone https://github.com/DeusData/codebase-memory-mcp.git
+git clone https://github.com/maplenk/codebase-memory-mcp.git
 cd codebase-memory-mcp
 scripts/build.sh                    # standard binary
 scripts/build.sh --with-ui          # with graph visualization

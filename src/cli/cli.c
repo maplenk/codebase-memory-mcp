@@ -2314,7 +2314,7 @@ static int verify_download_checksum(const char *archive_path, const char *archiv
         snprintf(checksum_url, sizeof(checksum_url), "%s/checksums.txt", dl_base);
     } else {
         snprintf(checksum_url, sizeof(checksum_url), "%s",
-                 "https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/"
+                 "https://github.com/maplenk/codebase-memory-mcp/releases/latest/download/"
                  "checksums.txt");
     }
     int rc = cbm_download_to_file_quiet(checksum_url, checksum_file);
@@ -3052,7 +3052,7 @@ int cbm_cmd_update(int argc, char **argv) {
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     const char *base_url = getenv("CBM_DOWNLOAD_URL");
     if (!base_url || !base_url[0]) {
-        base_url = "https://github.com/DeusData/codebase-memory-mcp/releases/latest/download";
+        base_url = "https://github.com/maplenk/codebase-memory-mcp/releases/latest/download";
     }
 
     char url[512];

@@ -4,14 +4,14 @@ set -euo pipefail
 # install.sh — One-line installer for codebase-memory-mcp.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/maplenk/codebase-memory-mcp/main/install.sh | bash
 #   curl -fsSL ... | bash -s -- --ui          # Install the UI variant
 #   curl -fsSL ... | bash -s -- --dir /path   # Custom install directory
 #
 # Environment:
 #   CBM_DOWNLOAD_URL  Override base URL for downloads (for testing)
 
-REPO="DeusData/codebase-memory-mcp"
+REPO="maplenk/codebase-memory-mcp"
 INSTALL_DIR="$HOME/.local/bin"
 VARIANT="standard"
 SKIP_CONFIG=false
