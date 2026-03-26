@@ -2847,6 +2847,117 @@ TEST(get_session_context_tools_list_includes_tool) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
+ *  SESSION HINTS (Phase 7B)
+ * ══════════════════════════════════════════════════════════════════ */
+
+TEST(session_hint_explore_area_overlap) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    /* First explore — should NOT have session_hint about prior exploration */
+    char *r1 = cbm_mcp_handle_tool(srv, "explore",
+                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    char *t1 = extract_text_content(r1);
+    ASSERT_NOT_NULL(t1);
+    ASSERT_NULL(strstr(t1, "\"session_hint\""));
+    free(t1);
+    free(r1);
+
+    /* Second explore same area — should have overlap hint */
+    char *r2 = cbm_mcp_handle_tool(srv, "explore",
+                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    char *t2 = extract_text_content(r2);
+    ASSERT_NOT_NULL(t2);
+    ASSERT_NOT_NULL(strstr(t2, "\"session_hint\""));
+    ASSERT_NOT_NULL(strstr(t2, "previously explored"));
+    free(t2);
+    free(r2);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(session_hint_understand_already_queried) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    /* First understand */
+    char *r1 = cbm_mcp_handle_tool(srv, "understand",
+                                   "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    free(r1);
+
+    /* Second understand same symbol — should have "already queried" hint */
+    char *r2 = cbm_mcp_handle_tool(srv, "understand",
+                                   "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    char *t2 = extract_text_content(r2);
+    ASSERT_NOT_NULL(t2);
+    ASSERT_NOT_NULL(strstr(t2, "\"session_hint\""));
+    ASSERT_NOT_NULL(strstr(t2, "already queried"));
+    free(t2);
+    free(r2);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(session_hint_prepare_change_edited_file) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    /* Trigger session creation via a tool call, then manually track file as edited */
+    char *r0 = cbm_mcp_handle_tool(srv, "get_session_context", "{}");
+    free(r0);
+    cbm_session_state_t *ss = cbm_mcp_server_session(srv);
+    ASSERT_NOT_NULL(ss);
+    cbm_session_track_file_edited(ss, "app/controllers/OrderController.php");
+
+    /* prepare_change for ProcessOrder — OrderController is in its blast radius */
+    char *raw = cbm_mcp_handle_tool(
+        srv, "prepare_change", "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    ASSERT_NOT_NULL(strstr(text, "\"session_hint\""));
+    ASSERT_NOT_NULL(strstr(text, "already edited"));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(session_hint_not_present_first_call) {
+    cbm_mcp_server_t *srv = setup_impact_server();
+    ASSERT_NOT_NULL(srv);
+
+    /* Fresh session: understand should NOT have session_hint (nothing to report) */
+    char *raw = cbm_mcp_handle_tool(srv, "understand",
+                                    "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    char *text = extract_text_content(raw);
+    ASSERT_NOT_NULL(text);
+    /* Might have "Related symbols not yet examined" which is valid, OR no hint at all.
+     * What we definitely should NOT have is "already queried" */
+    ASSERT_NULL(strstr(text, "already queried"));
+    free(text);
+    free(raw);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(session_has_area_membership) {
+    cbm_session_state_t *s = cbm_session_create();
+    ASSERT_NOT_NULL(s);
+
+    ASSERT_FALSE(cbm_session_has_area(s, "payment"));
+    cbm_session_track_area(s, "payment");
+    ASSERT_TRUE(cbm_session_has_area(s, "payment"));
+    ASSERT_FALSE(cbm_session_has_area(s, "inventory"));
+
+    cbm_session_free(s);
+    PASS();
+}
+
+/* ══════════════════════════════════════════════════════════════════
  *  SUITE
  * ══════════════════════════════════════════════════════════════════ */
 
@@ -3018,4 +3129,11 @@ SUITE(mcp) {
     RUN_TEST(get_session_context_no_project);
     RUN_TEST(session_accumulates_across_tools);
     RUN_TEST(get_session_context_tools_list_includes_tool);
+
+    /* Session hints (Phase 7B) */
+    RUN_TEST(session_hint_explore_area_overlap);
+    RUN_TEST(session_hint_understand_already_queried);
+    RUN_TEST(session_hint_prepare_change_edited_file);
+    RUN_TEST(session_hint_not_present_first_call);
+    RUN_TEST(session_has_area_membership);
 }

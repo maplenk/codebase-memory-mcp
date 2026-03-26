@@ -1130,6 +1130,16 @@ static cbm_session_state_t *ensure_session(cbm_mcp_server_t *srv) {
     return srv->session;
 }
 
+/* Forward declarations for Phase 7B session hint builders (defined later in file).
+ * Note: build_understand_session_hint is declared later, after connected_symbol_t typedef. */
+static char *build_search_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                       const char *project, const cbm_search_output_t *out);
+static char *build_impact_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                       const char *project,
+                                       const cbm_impact_analysis_t *impact);
+static void maybe_add_session_hint(yyjson_mut_doc *doc, yyjson_mut_val *root, const char *hint,
+                                   size_t char_budget, size_t *used);
+
 void cbm_mcp_server_set_project(cbm_mcp_server_t *srv, const char *project) {
     if (!srv) {
         return;
@@ -1555,6 +1565,9 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
     cbm_search_output_t out = {0};
     cbm_store_search(store, &params, &out);
 
+    /* Session: compute hint BEFORE tracking (so we can detect "already seen") */
+    char *session_hint = build_search_session_hint(srv, store, project, &out);
+
     /* Session tracking: record top result names as queried symbols (cap 20) */
     {
         cbm_session_state_t *ss = ensure_session(srv);
@@ -1580,6 +1593,7 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
     yyjson_mut_obj_add_val(doc, root, "results", results);
     yyjson_mut_obj_add_bool(doc, root, "has_more", out.total > offset + out.count);
 
+    maybe_add_session_hint(doc, root, session_hint, 0, NULL);
     char *json = yy_doc_to_str(doc);
     yyjson_mut_doc_free(doc);
 
@@ -1620,12 +1634,14 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
         yyjson_mut_obj_add_val(doc, root, "results", results);
         yyjson_mut_obj_add_int(doc, root, "shown", shown);
         yyjson_mut_obj_add_bool(doc, root, "has_more", out.total > offset + shown);
+        maybe_add_session_hint(doc, root, session_hint, char_budget, &used);
         json = yy_doc_to_str(doc);
         yyjson_mut_doc_free(doc);
     }
 
     cbm_store_search_free(&out);
 
+    free(session_hint);
     free(project);
     free(label);
     free(name_pattern);
@@ -2074,6 +2090,10 @@ static char *handle_get_impact_analysis(cbm_mcp_server_t *srv, const char *args)
                            impact.risk_score ? impact.risk_score : "");
     yyjson_mut_obj_add_str(doc, root, "summary", summary_text ? summary_text : "");
 
+    /* Session hint (Phase 7B) */
+    char *impact_hint = build_impact_session_hint(srv, store, project, &impact);
+    maybe_add_session_hint(doc, root, impact_hint, 0, NULL);
+
     char *json = yy_doc_to_str(doc);
     yyjson_mut_doc_free(doc);
 
@@ -2134,11 +2154,13 @@ static char *handle_get_impact_analysis(cbm_mcp_server_t *srv, const char *args)
                                impact.risk_score ? impact.risk_score : "");
         yyjson_mut_obj_add_str(doc, root, "summary", summary_text ? summary_text : "");
         yyjson_mut_obj_add_int(doc, root, "shown", shown);
+        maybe_add_session_hint(doc, root, impact_hint, char_budget, &used);
 
         json = yy_doc_to_str(doc);
         yyjson_mut_doc_free(doc);
     }
 
+    free(impact_hint);
     free(summary_text);
     cbm_store_impact_analysis_free(&impact);
     free(project);
@@ -3140,6 +3162,18 @@ typedef struct {
     int test_count;
 } review_scope_t;
 
+/* Forward declarations for Phase 7B hint builders that depend on above typedefs. */
+static char *build_explore_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                        const char *project, const char *area,
+                                        bool was_area_explored,
+                                        const cbm_search_result_t *const *matches,
+                                        int match_count);
+static char *build_understand_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                           const char *project, const char *symbol,
+                                           bool was_already_queried,
+                                           const connected_symbol_t *connected,
+                                           int connected_count);
+
 static bool compound_is_symbol_label(const char *label) {
     return label && (strcmp(label, "Function") == 0 || strcmp(label, "Method") == 0 ||
                      strcmp(label, "Class") == 0);
@@ -3918,7 +3952,8 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
         return not_indexed;
     }
 
-    /* Session tracking */
+    /* Session tracking: check area overlap BEFORE tracking */
+    bool was_area_explored = cbm_session_has_area(ensure_session(srv), area);
     {
         cbm_session_state_t *ss = ensure_session(srv);
         cbm_session_bump_query_count(ss);
@@ -3933,6 +3968,7 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     const cbm_search_result_t **matches = NULL;
     int match_count = 0;
     int match_cap = 0;
+    char *explore_hint = NULL;
     explore_dependency_t *deps = NULL;
     int dep_count = 0;
     cbm_key_symbol_t *hotspots = NULL;
@@ -4028,6 +4064,11 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     }
     yyjson_mut_obj_add_val(doc, root, "entry_points", entry_arr);
 
+    /* Compute session hint (Phase 7B) */
+    explore_hint =
+        build_explore_session_hint(srv, store, project, area, was_area_explored, matches, match_count);
+    maybe_add_session_hint(doc, root, explore_hint, 0, NULL);
+
     char *json = yy_doc_to_str(doc);
     yyjson_mut_doc_free(doc);
 
@@ -4118,6 +4159,7 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
         }
         yyjson_mut_obj_add_val(doc, root, "entry_points", entry_arr);
         yyjson_mut_obj_add_int(doc, root, "shown", shown);
+        maybe_add_session_hint(doc, root, explore_hint, char_budget, &used);
 
         json = yy_doc_to_str(doc);
         yyjson_mut_doc_free(doc);
@@ -4127,6 +4169,7 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     free(json);
 
 cleanup_explore:
+    free(explore_hint);
     free(contains_regex);
     free(file_glob);
     free(matches);
@@ -4170,7 +4213,8 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
         return not_indexed;
     }
 
-    /* Session tracking */
+    /* Session tracking: check BEFORE tracking for hint */
+    bool was_already_queried = cbm_session_has_symbol(ensure_session(srv), symbol);
     {
         cbm_session_state_t *ss = ensure_session(srv);
         cbm_session_bump_query_count(ss);
@@ -4190,6 +4234,7 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
     cbm_traverse_result_t callers = {0};
     cbm_traverse_result_t callees = {0};
     connected_symbol_t *connected = NULL;
+    char *understand_hint = NULL;
     int connected_count = 0;
     bool is_key_symbol = false;
     char *source = NULL;
@@ -4310,6 +4355,11 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
     }
     yyjson_mut_obj_add_val(doc, root, "connected_symbols", connected_arr);
 
+    /* Compute session hint (Phase 7B) */
+    understand_hint = build_understand_session_hint(srv, store, project, symbol,
+                                                    was_already_queried, connected, connected_count);
+    maybe_add_session_hint(doc, root, understand_hint, 0, NULL);
+
     char *json = yy_doc_to_str(doc);
     yyjson_mut_doc_free(doc);
 
@@ -4428,6 +4478,7 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
         }
         yyjson_mut_obj_add_val(doc, root, "connected_symbols", connected_arr);
         yyjson_mut_obj_add_int(doc, root, "shown", shown);
+        maybe_add_session_hint(doc, root, understand_hint, char_budget, &used);
 
         json = yy_doc_to_str(doc);
         yyjson_mut_doc_free(doc);
@@ -4437,6 +4488,7 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
     free(json);
 
 cleanup_understand:
+    free(understand_hint);
     free(project);
     free(symbol);
     free(source);
@@ -4508,6 +4560,7 @@ static char *handle_prepare_change(cbm_mcp_server_t *srv, const char *args) {
     size_t char_budget = max_tokens_to_char_budget(max_tokens);
     cbm_store_t *store = resolve_store(srv, project);
     char *result = NULL;
+    char *pc_hint = NULL;
 
     if (!symbol || !symbol[0]) {
         free(project);
@@ -4606,6 +4659,10 @@ static char *handle_prepare_change(cbm_mcp_server_t *srv, const char *args) {
     add_review_scope_json(doc, root, &scope, include_tests);
     yyjson_mut_obj_add_str(doc, root, "risk_score", impact.risk_score ? impact.risk_score : "");
     yyjson_mut_obj_add_str(doc, root, "summary", summary_text ? summary_text : "");
+
+    /* Session hint (Phase 7B) */
+    pc_hint = build_impact_session_hint(srv, store, project, &impact);
+    maybe_add_session_hint(doc, root, pc_hint, 0, NULL);
 
     char *json = yy_doc_to_str(doc);
     yyjson_mut_doc_free(doc);
@@ -4736,6 +4793,7 @@ static char *handle_prepare_change(cbm_mcp_server_t *srv, const char *args) {
         yyjson_mut_obj_add_str(doc, root, "risk_score", impact.risk_score ? impact.risk_score : "");
         yyjson_mut_obj_add_str(doc, root, "summary", summary_text ? summary_text : "");
         yyjson_mut_obj_add_int(doc, root, "shown", shown);
+        maybe_add_session_hint(doc, root, pc_hint, char_budget, &used);
 
         json = yy_doc_to_str(doc);
         yyjson_mut_doc_free(doc);
@@ -4745,6 +4803,7 @@ static char *handle_prepare_change(cbm_mcp_server_t *srv, const char *args) {
     free(json);
 
 cleanup_prepare_change:
+    free(pc_hint);
     free(summary_text);
     review_scope_free(&scope);
     cbm_store_impact_analysis_free(&impact);
@@ -5621,6 +5680,284 @@ static char *handle_ingest_traces(cbm_mcp_server_t *srv, const char *args) {
     char *result = cbm_mcp_text_result(json, false);
     free(json);
     return result;
+}
+
+/* ── Session hints (Phase 7B) ──────────────────────────────────── */
+
+#define SESSION_HINT_MAX_CHARS 800
+#define SESSION_HINT_QUERY_THRESHOLD 10
+
+/* Safe snprintf offset update: clamp to buffer size to prevent overflow. */
+#define HINT_SNPRINTF(buf, bufsz, offvar, ...)                                        \
+    do {                                                                              \
+        if ((offvar) < (int)(bufsz)) {                                                \
+            int _ret = snprintf((buf) + (offvar), (bufsz) - (size_t)(offvar), __VA_ARGS__); \
+            if (_ret > 0) (offvar) += _ret;                                           \
+            if ((offvar) >= (int)(bufsz)) (offvar) = (int)(bufsz) - 1;                \
+        }                                                                             \
+    } while (0)
+
+/* Append a global "high-PageRank untouched" suggestion to buf.
+ * Returns chars written (0 if nothing to say). */
+static int append_global_pagerank_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                       const char *project, char *buf, int off, int bufsz) {
+    cbm_session_state_t *ss = srv->session;
+    if (!ss || !store || !project || off >= bufsz) {
+        return 0;
+    }
+    int qc = cbm_session_query_count(ss);
+    if (qc <= SESSION_HINT_QUERY_THRESHOLD) {
+        return 0;
+    }
+
+    cbm_key_symbol_t *syms = NULL;
+    int count = 0;
+    cbm_store_get_key_symbols(store, project, NULL, 20, &syms, &count);
+
+    int start_off = off;
+    for (int i = 0; i < count; i++) {
+        if (syms[i].name && !cbm_session_has_symbol(ss, syms[i].name) &&
+            !cbm_session_has_file_read(ss, syms[i].file_path)) {
+            HINT_SNPRINTF(buf, (size_t)bufsz, off,
+                          "%sYou've made %d queries but haven't examined %s"
+                          " (PageRank #%d, %d inbound calls).",
+                          start_off > 0 ? " " : "", qc, syms[i].name, i + 1,
+                          syms[i].in_degree);
+            break;
+        }
+    }
+
+    cbm_store_key_symbols_free(syms, count);
+    return off - start_off;
+}
+
+/* Build hint for explore/search when an area was already explored.
+ * Returns heap string or NULL. Caller frees. */
+static char *build_explore_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                        const char *project, const char *area,
+                                        bool was_area_explored,
+                                        const cbm_search_result_t *const *matches,
+                                        int match_count) {
+    cbm_session_state_t *ss = srv->session;
+    if (!ss) {
+        return NULL;
+    }
+
+    char buf[SESSION_HINT_MAX_CHARS];
+    buf[0] = '\0';
+    int off = 0;
+
+    if (was_area_explored) {
+        /* Count new vs already-seen results */
+        int new_count = 0;
+        char new_names[400];
+        new_names[0] = '\0';
+        int noff = 0;
+        for (int i = 0; i < match_count && new_count < 5; i++) {
+            if (matches[i]->node.name && !cbm_session_has_symbol(ss, matches[i]->node.name)) {
+                if (noff > 0) {
+                    HINT_SNPRINTF(new_names, sizeof(new_names), noff, ", ");
+                }
+                HINT_SNPRINTF(new_names, sizeof(new_names), noff, "%s",
+                              matches[i]->node.name);
+                new_count++;
+            }
+        }
+        if (new_count > 0) {
+            HINT_SNPRINTF(buf, sizeof(buf), off,
+                          "You previously explored '%s'. New results not seen before: %s.",
+                          area, new_names);
+        } else {
+            HINT_SNPRINTF(buf, sizeof(buf), off,
+                          "You previously explored '%s'. All results were already examined.",
+                          area);
+        }
+    }
+
+    off += append_global_pagerank_hint(srv, store, project, buf, off, (int)sizeof(buf));
+
+    if (off == 0) {
+        return NULL;
+    }
+    return strdup(buf);
+}
+
+/* Build hint for understand when symbol was already queried.
+ * Returns heap string or NULL. Caller frees. */
+static char *build_understand_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                           const char *project, const char *symbol,
+                                           bool was_already_queried,
+                                           const connected_symbol_t *connected,
+                                           int connected_count) {
+    cbm_session_state_t *ss = srv->session;
+    if (!ss) {
+        return NULL;
+    }
+
+    char buf[SESSION_HINT_MAX_CHARS];
+    buf[0] = '\0';
+    int off = 0;
+
+    if (was_already_queried) {
+        HINT_SNPRINTF(buf, sizeof(buf), off,
+                      "You already queried '%s' earlier in this session.", symbol);
+    }
+
+    /* Find connected symbols not yet examined */
+    int unseen_count = 0;
+    char unseen_names[400];
+    unseen_names[0] = '\0';
+    int noff = 0;
+    for (int i = 0; i < connected_count && unseen_count < 5; i++) {
+        if (connected[i].node.name && !cbm_session_has_symbol(ss, connected[i].node.name)) {
+            if (noff > 0) {
+                HINT_SNPRINTF(unseen_names, sizeof(unseen_names), noff, ", ");
+            }
+            HINT_SNPRINTF(unseen_names, sizeof(unseen_names), noff, "%s",
+                          connected[i].node.name);
+            unseen_count++;
+        }
+    }
+    if (unseen_count > 0) {
+        HINT_SNPRINTF(buf, sizeof(buf), off,
+                      "%sRelated symbols not yet examined: %s.", off > 0 ? " " : "",
+                      unseen_names);
+    }
+
+    off += append_global_pagerank_hint(srv, store, project, buf, off, (int)sizeof(buf));
+
+    if (off == 0) {
+        return NULL;
+    }
+    return strdup(buf);
+}
+
+/* Build hint for prepare_change / get_impact_analysis when blast radius
+ * overlaps with already-edited files.
+ * Returns heap string or NULL. Caller frees. */
+static char *build_impact_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                       const char *project,
+                                       const cbm_impact_analysis_t *impact) {
+    cbm_session_state_t *ss = srv->session;
+    if (!ss || !impact) {
+        return NULL;
+    }
+
+    char buf[SESSION_HINT_MAX_CHARS];
+    buf[0] = '\0';
+    int off = 0;
+
+    /* Check if any files in the blast radius were already edited.
+     * Track seen files by pointer to avoid strstr false positives. */
+    const char *seen_files[5];
+    int edited_count = 0;
+    char edited_files[400];
+    edited_files[0] = '\0';
+    int eoff = 0;
+
+    /* Check the target symbol's file */
+    if (impact->file && cbm_session_has_file_edited(ss, impact->file)) {
+        HINT_SNPRINTF(edited_files, sizeof(edited_files), eoff, "%s", impact->file);
+        seen_files[edited_count++] = impact->file;
+    }
+
+    /* Check direct/indirect/transitive impact items */
+    const struct {
+        const cbm_impact_item_t *items;
+        int count;
+    } groups[] = {
+        {impact->direct, impact->direct_count},
+        {impact->indirect, impact->indirect_count},
+        {impact->transitive, impact->transitive_count},
+    };
+    for (int g = 0; g < 3 && edited_count < 5; g++) {
+        for (int i = 0; i < groups[g].count && edited_count < 5; i++) {
+            const char *file = groups[g].items[i].file;
+            if (file && cbm_session_has_file_edited(ss, file)) {
+                /* Exact dedup against already-seen files */
+                bool dup = false;
+                for (int s = 0; s < edited_count; s++) {
+                    if (strcmp(seen_files[s], file) == 0) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) {
+                    if (eoff > 0) {
+                        HINT_SNPRINTF(edited_files, sizeof(edited_files), eoff, ", ");
+                    }
+                    HINT_SNPRINTF(edited_files, sizeof(edited_files), eoff, "%s", file);
+                    seen_files[edited_count++] = file;
+                }
+            }
+        }
+    }
+
+    if (edited_count > 0) {
+        HINT_SNPRINTF(buf, sizeof(buf), off,
+                      "Warning: %s %s already edited this session.",
+                      edited_files, edited_count > 1 ? "were" : "was");
+    }
+
+    off += append_global_pagerank_hint(srv, store, project, buf, off, (int)sizeof(buf));
+
+    if (off == 0) {
+        return NULL;
+    }
+    return strdup(buf);
+}
+
+/* Build hint for search_graph: note how many results were already examined.
+ * Returns heap string or NULL. Caller frees. */
+static char *build_search_session_hint(cbm_mcp_server_t *srv, cbm_store_t *store,
+                                       const char *project, const cbm_search_output_t *out) {
+    cbm_session_state_t *ss = srv->session;
+    if (!ss || !out || out->count == 0) {
+        return NULL;
+    }
+
+    char buf[SESSION_HINT_MAX_CHARS];
+    int off = 0;
+
+    /* Count already-seen results */
+    int seen = 0;
+    for (int i = 0; i < out->count; i++) {
+        if (out->results[i].node.name && cbm_session_has_symbol(ss, out->results[i].node.name)) {
+            seen++;
+        }
+    }
+    if (seen > 0 && seen < out->count) {
+        off += snprintf(buf, sizeof(buf),
+                        "%d of %d results were already examined this session.", seen, out->count);
+    } else if (seen > 0 && seen == out->count) {
+        off += snprintf(buf, sizeof(buf),
+                        "All %d results were already examined this session.", out->count);
+    }
+
+    off += append_global_pagerank_hint(srv, store, project, buf, off, (int)sizeof(buf));
+
+    if (off == 0) {
+        return NULL;
+    }
+    return strdup(buf);
+}
+
+/* Inject session_hint into JSON doc if hint is non-NULL and fits the budget.
+ * For full-build (no budget): pass char_budget=0 and used=NULL.
+ * For truncated build: pass the tracked budget. */
+static void maybe_add_session_hint(yyjson_mut_doc *doc, yyjson_mut_val *root, const char *hint,
+                                   size_t char_budget, size_t *used) {
+    if (!hint || !hint[0]) {
+        return;
+    }
+    size_t hint_len = strlen(hint);
+    if (used && char_budget > 0 && (*used + hint_len + 30 > char_budget)) {
+        return; /* skip — would blow the token budget */
+    }
+    yyjson_mut_obj_add_strcpy(doc, root, "session_hint", hint);
+    if (used) {
+        *used += hint_len + 30;
+    }
 }
 
 /* ── Session context (Phase 7A) ────────────────────────────────── */
