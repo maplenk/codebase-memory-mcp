@@ -18,13 +18,13 @@
 #include <string.h> /* memset */
 
 #ifdef _WIN32
-  #ifndef WIN32_LEAN_AND_MEAN
-    #define WIN32_LEAN_AND_MEAN
-  #endif
-  #include <windows.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #else
-  #include <sys/mman.h>
-  #include <unistd.h> /* sysconf, _SC_PAGESIZE */
+#include <sys/mman.h>
+#include <unistd.h> /* sysconf, _SC_PAGESIZE */
 #endif
 
 /* ── Static state (initialized once) ──────────────────────────── */
@@ -77,8 +77,7 @@ static void check_pressure(size_t allocated) {
         // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
         snprintf(budget_mb, sizeof(budget_mb), "%zu", g_budget / MB_DIVISOR);
         // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-        snprintf(pct_str, sizeof(pct_str), "%zu",
-                 g_budget > 0 ? (allocated * 100) / g_budget : 0);
+        snprintf(pct_str, sizeof(pct_str), "%zu", g_budget > 0 ? (allocated * 100) / g_budget : 0);
         cbm_log_warn("mem.pressure.warn", "allocated_mb", alloc_mb, "budget_mb", budget_mb, "pct",
                      pct_str);
     } else if (!over && was) {
@@ -92,8 +91,7 @@ static void check_pressure(size_t allocated) {
         // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
         snprintf(budget_mb, sizeof(budget_mb), "%zu", g_budget / MB_DIVISOR);
         // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-        snprintf(pct_str, sizeof(pct_str), "%zu",
-                 g_budget > 0 ? (allocated * 100) / g_budget : 0);
+        snprintf(pct_str, sizeof(pct_str), "%zu", g_budget > 0 ? (allocated * 100) / g_budget : 0);
         cbm_log_info("mem.pressure.ok", "allocated_mb", alloc_mb, "budget_mb", budget_mb, "pct",
                      pct_str);
     }
@@ -152,8 +150,7 @@ void *cbm_vmem_alloc(size_t size) {
 #endif
 
     if (!ptr) {
-        cbm_log_error("vmem.alloc.fail", "size_mb",
-                       size > MB_DIVISOR ? "large" : "small");
+        cbm_log_error("vmem.alloc.fail", "size_mb", size > MB_DIVISOR ? "large" : "small");
         return NULL;
     }
 

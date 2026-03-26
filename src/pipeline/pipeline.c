@@ -805,8 +805,7 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
                                                mtime_ns, fst.st_size);
                 }
             }
-            if (cbm_store_compute_pagerank(hash_store, p->project_name, 20, 0.85) !=
-                CBM_STORE_OK) {
+            if (cbm_store_compute_pagerank(hash_store, p->project_name, 20, 0.85) != CBM_STORE_OK) {
                 /* PageRank is a ranking enhancement; keep a successful index even if
                  * score computation fails on this pass. */
                 cbm_log_warn("pipeline.warn", "phase", "pagerank", "project", p->project_name,

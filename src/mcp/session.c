@@ -196,8 +196,7 @@ bool cbm_session_has_symbol(const cbm_session_state_t *s, const char *name) {
 
 /* ── Iteration ─────────────────────────────────────────────────── */
 
-void cbm_session_foreach_file_read(const cbm_session_state_t *s, cbm_session_iter_fn fn,
-                                   void *ud) {
+void cbm_session_foreach_file_read(const cbm_session_state_t *s, cbm_session_iter_fn fn, void *ud) {
     if (s) {
         set_foreach(s->files_read, fn, ud);
     }
