@@ -186,6 +186,10 @@ bool cbm_session_has_file_edited(const cbm_session_state_t *s, const char *path)
     return s && path && cbm_ht_has(s->files_edited, path);
 }
 
+bool cbm_session_has_area(const cbm_session_state_t *s, const char *keyword) {
+    return s && keyword && cbm_ht_has(s->areas_explored, keyword);
+}
+
 bool cbm_session_has_symbol(const cbm_session_state_t *s, const char *name) {
     return s && name && cbm_ht_has(s->symbols_queried, name);
 }

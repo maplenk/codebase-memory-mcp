@@ -46,6 +46,7 @@ time_t cbm_session_start_time(const cbm_session_state_t *s);
 bool cbm_session_has_file_read(const cbm_session_state_t *s, const char *path);
 bool cbm_session_has_file_edited(const cbm_session_state_t *s, const char *path);
 bool cbm_session_has_symbol(const cbm_session_state_t *s, const char *name);
+bool cbm_session_has_area(const cbm_session_state_t *s, const char *keyword);
 
 /* ── Iteration ─────────────────────────────────────────────────── */
 
