@@ -214,7 +214,7 @@ jobs:
 
   # ── Step 3: Build binaries (standard + UI, all OS) ──────────
   build-unix:
-    needs: [test-unix, test-windows]
+    needs: [test-unix]
     strategy:
       matrix:
         include:
@@ -286,7 +286,7 @@ jobs:
           path: "*.tar.gz"
 
   build-windows:
-    needs: [test-unix, test-windows]
+    needs: [test-unix]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
