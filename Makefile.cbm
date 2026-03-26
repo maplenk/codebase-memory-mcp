@@ -42,7 +42,8 @@ IS_GCC := $(shell echo | $(CC) -dM -E - 2>/dev/null | grep -q '__GNUC__' && ! ec
 GCC_ONLY_FLAGS :=
 ifeq ($(IS_GCC),yes)
 GCC_ONLY_FLAGS := -Wno-format-truncation -Wno-unused-result \
-                  -Wno-stringop-truncation -Wno-alloc-size-larger-than
+                  -Wno-stringop-truncation -Wno-alloc-size-larger-than \
+                  -Wno-maybe-uninitialized
 endif
 
 CFLAGS_COMMON = -std=c11 -D_DEFAULT_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror \
@@ -222,7 +223,7 @@ SQLITE3_CFLAGS_TEST = -std=c11 -g -O1 -w -DSQLITE_DQS=0 -DSQLITE_THREADSAFE=1
 
 # TRE regex (vendored, Windows only — POSIX uses system <regex.h>)
 TRE_SRC = vendored/tre/tre_all.c
-TRE_CFLAGS = -std=c11 -g -O1 -w -Ivendored/tre
+TRE_CFLAGS = -std=c11 -g -O1 -w -Ivendored/tre -fno-sanitize=alignment
 
 # yyjson (vendored)
 YYJSON_SRC = vendored/yyjson/yyjson.c

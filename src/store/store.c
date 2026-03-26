@@ -5903,7 +5903,8 @@ static int summary_build_clusters(const arch_summary_file_row_t *rows, int row_c
         return CBM_STORE_OK;
     }
 
-    int64_t *node_ids = malloc((size_t)row_count * sizeof(int64_t));
+    int64_t *node_ids = NULL;
+    node_ids = malloc((size_t)row_count * sizeof(int64_t));
     if (!node_ids) {
         return CBM_STORE_ERR;
     }
