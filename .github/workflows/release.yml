@@ -808,6 +808,7 @@ jobs:
   # If it fails, the draft stays unpublished.
   verify:
     needs: [release-draft]
+    if: ${{ !cancelled() && needs.release-draft.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
