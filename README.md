@@ -20,6 +20,89 @@ High-quality parsing through [tree-sitter](https://tree-sitter.github.io/tree-si
   <em>Built-in 3D graph visualization (UI variant) — explore your knowledge graph at localhost:9749</em>
 </p>
 
+---
+
+## Fork: Enhanced Context Intelligence
+
+> This is a fork of [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) with 8 additional MCP tools focused on deeper code understanding, session awareness, and safer refactoring.
+
+### What this fork adds
+
+| Feature | Tool | What it does |
+|---------|------|-------------|
+| **Architecture Summary** | `get_architecture_summary` | One-call structured overview: top files by connectivity, route→controller→service chains, Louvain clusters, entry points. Token-budgeted markdown output with optional focus filtering. |
+| **PageRank Ranking** | `get_key_symbols` | Top-K symbols ranked by structural importance (PageRank on call graph). Also enhances `search_graph` and `trace_call_path` with `ranked` parameter. |
+| **Token Budgets** | *(enhances existing tools)* | `max_tokens` parameter on `search_graph`, `trace_call_path`, `query_graph`. Two-tier truncation: top 5 results in full, remainder as signatures only. |
+| **Blast Radius Analysis** | `get_impact_analysis` | Multi-edge-type BFS with risk scoring (high/medium/low), test coverage detection, symbol disambiguation, and depth-grouped results. |
+| **Compound Queries** | `explore` | Area exploration: fuzzy name/QN/path search + dependency summaries + hotspots + entry points in one call. |
+| | `understand` | Symbol deep-dive: 3-tier resolution (exact QN → short name → suffix match) + source code + callers/callees + PageRank. |
+| | `prepare_change` | Pre-change analysis: blast radius + review scope (must_review/should_review) + affected tests. |
+| **Session Memory** | `get_session_context` | Tracks files read, symbols queried, areas explored during the session. Shows `related_untouched` — graph neighbors you haven't examined yet, ranked by PageRank. |
+| **Session Recovery** | `get_session_summary` | Compact markdown summary of the entire session for context recovery after compaction. |
+| **Proactive Hints** | *(enhances existing tools)* | 5 tool responses enriched with session-aware hints: repeat query detection, untouched neighbor suggestions, edit conflict warnings. |
+
+### Additional fixes
+
+- Read-only WAL-mode snapshot DB handling (immutable SQLite URI)
+- PageRank failures made non-fatal during indexing
+- 12 bug fixes including OOM infinite loops, SQLite bind limits, POSIX regex, memory leaks
+- 2,657 tests passing, ASan/UBSan clean
+
+### Install from this fork
+
+```bash
+# Build from source
+git clone https://github.com/maplenk/codebase-memory-mcp.git
+cd codebase-memory-mcp
+scripts/build.sh
+
+# Install binary
+sudo cp build/c/codebase-memory-mcp /usr/local/bin/
+
+# Or auto-configure all detected agents
+./build/c/codebase-memory-mcp install
+```
+
+### Recommended CLAUDE.md instructions
+
+Add to your project's `.claude/instructions.md`:
+
+```markdown
+## Tool Selection: Graph vs Grep
+
+This project has `codebase-memory-mcp` providing a knowledge graph.
+
+### Use graph tools for:
+- Understanding structure: `explore` an area, then `understand` specific symbols
+- Before changes: `prepare_change` to see blast radius and affected tests
+- Architecture: `get_architecture_summary` for project overview
+- Important code: `get_key_symbols` for highest-impact functions
+- Call tracing: `trace_call_path` for callers/callees across files
+
+### Use grep for:
+- Exact identifier/string searches
+- Regex pattern matching
+- Finding all literal occurrences of a variable/constant
+
+### Workflow: explore (graph) → understand (graph) → grep (exact matches) → prepare_change (graph) → edit → grep (verify)
+
+### Session recovery:
+If context was compacted, call `get_session_context` for a quick view, or
+`get_session_summary` for a full narrative with findings and next steps.
+```
+
+### Upstream status
+
+These features are being submitted as PRs to [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp):
+- [#147](https://github.com/DeusData/codebase-memory-mcp/pull/147) — PageRank + Architecture + Token Budgets
+- [#148](https://github.com/DeusData/codebase-memory-mcp/pull/148) — Blast Radius Analysis
+- [#149](https://github.com/DeusData/codebase-memory-mcp/pull/149) — Compound Query Tools
+- [#150](https://github.com/DeusData/codebase-memory-mcp/pull/150) — Session Memory & Proactive Hints
+
+This fork will be maintained independently until/unless features are merged upstream.
+
+---
+
 ## Why codebase-memory-mcp
 
 - **Extreme indexing speed** — Linux kernel (28M LOC, 75K files) in 3 minutes. RAM-first pipeline: LZ4 compression, in-memory SQLite, fused Aho-Corasick pattern matching. Memory released after indexing.
