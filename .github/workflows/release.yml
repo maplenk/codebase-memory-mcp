@@ -893,9 +893,9 @@ jobs:
               fi
             fi
 
-            # Poll /api/v3/analyses/<id> until status=completed (max 20 min)
+            # Poll /api/v3/analyses/<id> until status=completed (max 120 min)
             SCAN_COMPLETE=false
-            for attempt in $(seq 1 120); do
+            for attempt in $(seq 1 720); do
               RESULT=$(curl -sf --max-time 10 \
                 -H "x-apikey: $VT_API_KEY" \
                 "https://www.virustotal.com/api/v3/analyses/$ANALYSIS_ID" 2>/dev/null || echo "")
@@ -943,7 +943,8 @@ jobs:
             done
 
             if [ "$SCAN_COMPLETE" != "true" ]; then
-              echo "BLOCKED: $BASENAME scan did not complete within 20 minutes!"
+              # Script files (sh, ps1) are low-priority in VT queue — warn but don't block
+              echo "BLOCKED: $BASENAME scan did not complete within 120 minutes!"
               echo "FAIL" >> /tmp/vt_gate_fail
             fi
           done
