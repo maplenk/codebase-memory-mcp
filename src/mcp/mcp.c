@@ -901,7 +901,10 @@ static void detect_session(cbm_mcp_server_t *srv);
  * On failure, sets *err_out to a heap-allocated MCP error response and returns NULL.
  * Caller must free *err_out when non-NULL.
  * When auto-indexing triggers, *project_ptr may be replaced with the canonical
- * session_project so subsequent queries match the DB. */
+ * session_project so subsequent queries match the DB.
+ *
+ * NOTE: On a cache miss the first query blocks while inline indexing runs.
+ * Gated by auto_index config flag + auto_index_limit file count guard. */
 static cbm_store_t *try_auto_index(cbm_mcp_server_t *srv, char **project_ptr, char **err_out) {
     *err_out = NULL;
     const char *project = *project_ptr;
