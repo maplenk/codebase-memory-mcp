@@ -115,6 +115,9 @@ TEST(store_project_delete) {
 }
 
 TEST(store_open_path_query_readonly_db) {
+#ifdef _WIN32
+    SKIP("mkstemp + chmod not available on Windows");
+#endif
     char path[] = "/tmp/cbm_store_query_XXXXXX";
     int fd = mkstemp(path);
     ASSERT_TRUE(fd >= 0);
@@ -122,7 +125,8 @@ TEST(store_open_path_query_readonly_db) {
 
     cbm_store_t *writer = cbm_store_open_path(path);
     ASSERT_NOT_NULL(writer);
-    ASSERT_EQ(cbm_store_upsert_project(writer, "readonly-proj", "/tmp/readonly-proj"), CBM_STORE_OK);
+    ASSERT_EQ(cbm_store_upsert_project(writer, "readonly-proj", "/tmp/readonly-proj"),
+              CBM_STORE_OK);
     cbm_store_close(writer);
 
     ASSERT_EQ(chmod(path, 0444), 0);
@@ -142,6 +146,9 @@ TEST(store_open_path_query_readonly_db) {
 }
 
 TEST(store_open_path_query_direct_writer_db) {
+#ifdef _WIN32
+    SKIP("mkstemp + chmod not available on Windows");
+#endif
     char path[] = "/tmp/cbm_store_query_writer_XXXXXX";
     int fd = mkstemp(path);
     ASSERT_TRUE(fd >= 0);
@@ -158,8 +165,8 @@ TEST(store_open_path_query_direct_writer_db) {
         .end_line = 3,
         .properties = "{}",
     };
-    ASSERT_EQ(cbm_write_db(path, "writer-proj", "/tmp/writer-proj", "2026-03-25T00:00:00Z",
-                           &node, 1, NULL, 0),
+    ASSERT_EQ(cbm_write_db(path, "writer-proj", "/tmp/writer-proj", "2026-03-25T00:00:00Z", &node,
+                           1, NULL, 0),
               0);
 
     /* Reopen in the same way the pipeline does to add post-dump metadata. */
@@ -1041,10 +1048,8 @@ TEST(store_node_null_project) {
     ASSERT_NOT_NULL(s);
 
     /* Upsert with NULL project — should fail gracefully */
-    cbm_node_t n = {.project = NULL,
-                    .label = "Function",
-                    .name = "Foo",
-                    .qualified_name = "null.Foo"};
+    cbm_node_t n = {
+        .project = NULL, .label = "Function", .name = "Foo", .qualified_name = "null.Foo"};
     int64_t id = cbm_store_upsert_node(s, &n);
     /* Either returns error or silently succeeds; must not crash */
     (void)id;
@@ -1058,10 +1063,7 @@ TEST(store_node_null_qn) {
     cbm_store_upsert_project(s, "test", "/tmp/test");
 
     /* Upsert with NULL qualified_name */
-    cbm_node_t n = {.project = "test",
-                    .label = "Function",
-                    .name = "Bar",
-                    .qualified_name = NULL};
+    cbm_node_t n = {.project = "test", .label = "Function", .name = "Bar", .qualified_name = NULL};
     int64_t id = cbm_store_upsert_node(s, &n);
     /* Must not crash regardless of return value */
     (void)id;
@@ -1121,10 +1123,8 @@ TEST(store_find_by_qn_not_found) {
     cbm_store_upsert_project(s, "test", "/tmp/test");
 
     /* Insert a node so the store is non-empty */
-    cbm_node_t n = {.project = "test",
-                    .label = "Function",
-                    .name = "Exists",
-                    .qualified_name = "test.Exists"};
+    cbm_node_t n = {
+        .project = "test", .label = "Function", .name = "Exists", .qualified_name = "test.Exists"};
     cbm_store_upsert_node(s, &n);
 
     /* Search for a non-existent QN */
@@ -1320,22 +1320,14 @@ TEST(store_delete_by_label_verify_remaining) {
     cbm_store_t *s = cbm_store_open_memory();
     cbm_store_upsert_project(s, "test", "/tmp/test");
 
-    cbm_node_t n1 = {.project = "test",
-                     .label = "Function",
-                     .name = "FuncA",
-                     .qualified_name = "test.FuncA"};
-    cbm_node_t n2 = {.project = "test",
-                     .label = "Class",
-                     .name = "ClassB",
-                     .qualified_name = "test.ClassB"};
-    cbm_node_t n3 = {.project = "test",
-                     .label = "Function",
-                     .name = "FuncC",
-                     .qualified_name = "test.FuncC"};
-    cbm_node_t n4 = {.project = "test",
-                     .label = "Method",
-                     .name = "MethodD",
-                     .qualified_name = "test.MethodD"};
+    cbm_node_t n1 = {
+        .project = "test", .label = "Function", .name = "FuncA", .qualified_name = "test.FuncA"};
+    cbm_node_t n2 = {
+        .project = "test", .label = "Class", .name = "ClassB", .qualified_name = "test.ClassB"};
+    cbm_node_t n3 = {
+        .project = "test", .label = "Function", .name = "FuncC", .qualified_name = "test.FuncC"};
+    cbm_node_t n4 = {
+        .project = "test", .label = "Method", .name = "MethodD", .qualified_name = "test.MethodD"};
     cbm_store_upsert_node(s, &n1);
     cbm_store_upsert_node(s, &n2);
     cbm_store_upsert_node(s, &n3);
@@ -1507,11 +1499,10 @@ TEST(store_node_properties_special_chars) {
     cbm_store_upsert_project(s, "test", "/tmp/test");
 
     /* JSON with quotes, backslashes, unicode, newlines */
-    const char *props =
-        "{\"desc\":\"line1\\nline2\","
-        "\"path\":\"C:\\\\Users\\\\test\","
-        "\"emoji\":\"\\u2603\","
-        "\"nested\":{\"key\":\"val with \\\"quotes\\\"\"}}";
+    const char *props = "{\"desc\":\"line1\\nline2\","
+                        "\"path\":\"C:\\\\Users\\\\test\","
+                        "\"emoji\":\"\\u2603\","
+                        "\"nested\":{\"key\":\"val with \\\"quotes\\\"\"}}";
 
     cbm_node_t n = {.project = "test",
                     .label = "Function",

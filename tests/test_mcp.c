@@ -608,12 +608,30 @@ static cbm_mcp_server_t *setup_pagerank_server(void) {
     cbm_mcp_server_set_project(srv, "test-rank");
 
     cbm_node_t nodes[] = {
-        {.project = "test-rank", .label = "Function", .name = "Root", .qualified_name = "test-rank.Root"},
-        {.project = "test-rank", .label = "Function", .name = "Small", .qualified_name = "test-rank.Small"},
-        {.project = "test-rank", .label = "Function", .name = "Hub", .qualified_name = "test-rank.Hub"},
-        {.project = "test-rank", .label = "Function", .name = "Leaf", .qualified_name = "test-rank.Leaf"},
-        {.project = "test-rank", .label = "Function", .name = "CallerB", .qualified_name = "test-rank.CallerB"},
-        {.project = "test-rank", .label = "Function", .name = "CallerC", .qualified_name = "test-rank.CallerC"},
+        {.project = "test-rank",
+         .label = "Function",
+         .name = "Root",
+         .qualified_name = "test-rank.Root"},
+        {.project = "test-rank",
+         .label = "Function",
+         .name = "Small",
+         .qualified_name = "test-rank.Small"},
+        {.project = "test-rank",
+         .label = "Function",
+         .name = "Hub",
+         .qualified_name = "test-rank.Hub"},
+        {.project = "test-rank",
+         .label = "Function",
+         .name = "Leaf",
+         .qualified_name = "test-rank.Leaf"},
+        {.project = "test-rank",
+         .label = "Function",
+         .name = "CallerB",
+         .qualified_name = "test-rank.CallerB"},
+        {.project = "test-rank",
+         .label = "Function",
+         .name = "CallerC",
+         .qualified_name = "test-rank.CallerC"},
     };
     int64_t ids[6];
     for (int i = 0; i < 6; i++) {
@@ -675,8 +693,10 @@ static cbm_mcp_server_t *setup_truncation_server(void) {
     }
 
     for (int i = 0; i < 5; i++) {
-        cbm_edge_t edge = {
-            .project = "test-budget", .source_id = ids[i], .target_id = ids[i + 1], .type = "CALLS"};
+        cbm_edge_t edge = {.project = "test-budget",
+                           .source_id = ids[i],
+                           .target_id = ids[i + 1],
+                           .type = "CALLS"};
         cbm_store_insert_edge(st, &edge);
     }
 
@@ -874,7 +894,7 @@ TEST(tool_get_architecture_summary_truncated) {
     snprintf(req, sizeof(req),
              "{\"jsonrpc\":\"2.0\",\"id\":26,\"method\":\"tools/call\","
              "\"params\":{\"name\":\"get_architecture_summary\","
-              "\"arguments\":{\"project\":\"%s\",\"max_tokens\":1}}}",
+             "\"arguments\":{\"project\":\"%s\",\"max_tokens\":1}}}",
              proj_name);
 
     char *resp = cbm_mcp_server_handle(srv, req);
@@ -889,6 +909,9 @@ TEST(tool_get_architecture_summary_truncated) {
 }
 
 TEST(tool_get_architecture_summary_project_path_alias) {
+#ifdef _WIN32
+    SKIP("temp path handling — Windows port pending");
+#endif
     char tmp_dir[256];
     cbm_mcp_server_t *srv = setup_arch_summary_server(tmp_dir, sizeof(tmp_dir));
     ASSERT_NOT_NULL(srv);
@@ -1000,7 +1023,8 @@ TEST(tool_search_code_no_project) {
                                    "\"project\":\"nonexistent\"}}}");
     ASSERT_NOT_NULL(resp);
     /* No project indexed → error */
-    ASSERT_TRUE(strstr(resp, "not found") || strstr(resp, "not indexed") || strstr(resp, "required"));
+    ASSERT_TRUE(strstr(resp, "not found") || strstr(resp, "not indexed") ||
+                strstr(resp, "required"));
     free(resp);
 
     cbm_mcp_server_free(srv);
@@ -1419,8 +1443,8 @@ TEST(tool_search_graph_ranked_pagerank) {
     cbm_mcp_server_t *srv = setup_pagerank_server();
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(srv, "search_graph",
-                                    "{\"project\":\"test-rank\",\"label\":\"Function\",\"limit\":10}");
+    char *raw = cbm_mcp_handle_tool(
+        srv, "search_graph", "{\"project\":\"test-rank\",\"label\":\"Function\",\"limit\":10}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
@@ -1459,9 +1483,9 @@ TEST(tool_trace_call_path_ranked_pagerank) {
     cbm_mcp_server_t *srv = setup_pagerank_server();
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(
-        srv, "trace_call_path",
-        "{\"project\":\"test-rank\",\"function_name\":\"Root\",\"direction\":\"outbound\",\"depth\":3}");
+    char *raw = cbm_mcp_handle_tool(srv, "trace_call_path",
+                                    "{\"project\":\"test-rank\",\"function_name\":\"Root\","
+                                    "\"direction\":\"outbound\",\"depth\":3}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
@@ -1593,18 +1617,17 @@ TEST(tool_get_impact_analysis_basic) {
     cbm_mcp_server_t *srv = setup_impact_server();
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(
-        srv, "get_impact_analysis",
-        "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\",\"depth\":4}");
+    char *raw =
+        cbm_mcp_handle_tool(srv, "get_impact_analysis",
+                            "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\",\"depth\":4}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
     ASSERT_NOT_NULL(strstr(text, "\"symbol\":\"ProcessOrder\""));
     ASSERT_NOT_NULL(strstr(text, "\"qualified_name\":\"impact.service.ProcessOrder\""));
     ASSERT_NOT_NULL(strstr(text, "\"risk_score\":\"high\""));
-    ASSERT_NOT_NULL(strstr(
-        text,
-        "\"summary\":\"2 direct callers, 2 route/entry points, 1 affected tests, 1 transitive impacts\""));
+    ASSERT_NOT_NULL(strstr(text, "\"summary\":\"2 direct callers, 2 route/entry points, 1 affected "
+                                 "tests, 1 transitive impacts\""));
     ASSERT_NOT_NULL(strstr(text, "\"affected_tests\":["));
     free(text);
     free(raw);
@@ -1617,8 +1640,8 @@ TEST(tool_get_impact_analysis_missing_symbol) {
     cbm_mcp_server_t *srv = setup_impact_server();
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(
-        srv, "get_impact_analysis", "{\"project\":\"impact\",\"symbol\":\"MissingSymbol\"}");
+    char *raw = cbm_mcp_handle_tool(srv, "get_impact_analysis",
+                                    "{\"project\":\"impact\",\"symbol\":\"MissingSymbol\"}");
     ASSERT_NOT_NULL(raw);
     ASSERT_NOT_NULL(strstr(raw, "search_graph(name_pattern"));
     free(raw);
@@ -1657,8 +1680,8 @@ TEST(tool_get_impact_analysis_include_tests_false) {
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
     ASSERT_NOT_NULL(strstr(text, "\"affected_tests\":[]"));
-    ASSERT_NOT_NULL(
-        strstr(text, "\"summary\":\"2 direct callers, 2 route/entry points, 1 transitive impacts\""));
+    ASSERT_NOT_NULL(strstr(
+        text, "\"summary\":\"2 direct callers, 2 route/entry points, 1 transitive impacts\""));
     free(text);
     free(raw);
 
@@ -1691,14 +1714,14 @@ TEST(tool_get_impact_analysis_route_and_entry_point_typing) {
     cbm_mcp_server_t *srv = setup_impact_server();
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(
-        srv, "get_impact_analysis",
-        "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\",\"depth\":4}");
+    char *raw =
+        cbm_mcp_handle_tool(srv, "get_impact_analysis",
+                            "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\",\"depth\":4}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
-    ASSERT_NOT_NULL(
-        strstr(text, "\"name\":\"CliEntry\",\"file\":\"app/cli/order_cli.php\",\"type\":\"entry_point\""));
+    ASSERT_NOT_NULL(strstr(
+        text, "\"name\":\"CliEntry\",\"file\":\"app/cli/order_cli.php\",\"type\":\"entry_point\""));
     ASSERT_NOT_NULL(
         strstr(text, "\"name\":\"POST /orders\",\"file\":\"routes/api.php\",\"type\":\"route\""));
     free(text);
@@ -1712,8 +1735,7 @@ TEST(tool_explore_basic) {
     cbm_mcp_server_t *srv = setup_impact_server();
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(srv, "explore",
-                                    "{\"project\":\"impact\",\"area\":\"Order\"}");
+    char *raw = cbm_mcp_handle_tool(srv, "explore", "{\"project\":\"impact\",\"area\":\"Order\"}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
@@ -1797,8 +1819,8 @@ TEST(tool_understand_suffix_ambiguity_returns_suggestions) {
     cbm_mcp_server_t *srv = setup_snippet_server(tmp, sizeof(tmp));
     ASSERT_NOT_NULL(srv);
 
-    char *raw =
-        cbm_mcp_handle_tool(srv, "understand", "{\"project\":\"test-project\",\"symbol\":\"server.Run\"}");
+    char *raw = cbm_mcp_handle_tool(srv, "understand",
+                                    "{\"project\":\"test-project\",\"symbol\":\"server.Run\"}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
@@ -1840,8 +1862,8 @@ TEST(tool_prepare_change_basic) {
     cbm_mcp_server_t *srv = setup_impact_server();
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(
-        srv, "prepare_change", "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    char *raw = cbm_mcp_handle_tool(srv, "prepare_change",
+                                    "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
@@ -1867,8 +1889,11 @@ TEST(tool_prepare_change_include_tests_false) {
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
     ASSERT_NOT_NULL(strstr(text, "\"affected_tests\":[]"));
-    ASSERT_NOT_NULL(strstr(text, "\"summary\":\"2 direct callers, 2 route/entry points, 1 transitive impacts\""));
-    ASSERT_NULL(strstr(text, "\"review_scope\":{\"must_review\":[\"app/services/order_service.php\"],\"should_review\":[\"app/ui/browser_flow.php\"],\"tests\""));
+    ASSERT_NOT_NULL(strstr(
+        text, "\"summary\":\"2 direct callers, 2 route/entry points, 1 transitive impacts\""));
+    ASSERT_NULL(strstr(
+        text, "\"review_scope\":{\"must_review\":[\"app/services/"
+              "order_service.php\"],\"should_review\":[\"app/ui/browser_flow.php\"],\"tests\""));
     free(text);
     free(raw);
 
@@ -1902,8 +1927,8 @@ TEST(tool_explore_missing_project) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(srv, "explore",
-                                    "{\"project\":\"nonexistent\",\"area\":\"foo\"}");
+    char *raw =
+        cbm_mcp_handle_tool(srv, "explore", "{\"project\":\"nonexistent\",\"area\":\"foo\"}");
     ASSERT_NOT_NULL(raw);
     ASSERT_NOT_NULL(strstr(raw, "isError"));
     ASSERT_NOT_NULL(strstr(raw, "not found"));
@@ -1937,8 +1962,8 @@ TEST(tool_understand_missing_project) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
 
-    char *raw = cbm_mcp_handle_tool(srv, "understand",
-                                    "{\"project\":\"nonexistent\",\"symbol\":\"Foo\"}");
+    char *raw =
+        cbm_mcp_handle_tool(srv, "understand", "{\"project\":\"nonexistent\",\"symbol\":\"Foo\"}");
     ASSERT_NOT_NULL(raw);
     ASSERT_NOT_NULL(strstr(raw, "isError"));
     ASSERT_NOT_NULL(strstr(raw, "not found"));
@@ -2548,9 +2573,9 @@ TEST(server_handle_tools_call_missing_name) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
 
     /* tools/call with no tool name in params */
-    char *resp = cbm_mcp_server_handle(
-        srv, "{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"tools/call\","
-             "\"params\":{\"arguments\":{}}}");
+    char *resp =
+        cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"tools/call\","
+                                   "\"params\":{\"arguments\":{}}}");
     ASSERT_NOT_NULL(resp);
     /* Should return error about unknown/missing tool */
     ASSERT_NOT_NULL(strstr(resp, "\"id\":50"));
@@ -2589,11 +2614,10 @@ TEST(mcp_server_run_rapid_messages) {
     ASSERT_EQ(pipe(fds), 0);
 
     /* Write all 3 messages to the write end in one shot */
-    const char *msgs =
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\","
-        "\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{}}}\n"
-        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n"
-        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}\n";
+    const char *msgs = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\","
+                       "\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{}}}\n"
+                       "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n"
+                       "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}\n";
     ssize_t written = write(fds[1], msgs, strlen(msgs));
     ASSERT_TRUE(written > 0);
     close(fds[1]); /* EOF signals end of input to the server */
@@ -2751,8 +2775,7 @@ TEST(get_session_context_after_tools) {
     ASSERT_NOT_NULL(srv);
 
     /* Call explore → should track area */
-    char *r1 = cbm_mcp_handle_tool(srv, "explore",
-                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    char *r1 = cbm_mcp_handle_tool(srv, "explore", "{\"project\":\"impact\",\"area\":\"Order\"}");
     free(r1);
 
     /* Call understand → should track symbol */
@@ -2812,8 +2835,7 @@ TEST(session_accumulates_across_tools) {
     ASSERT_NOT_NULL(srv);
 
     /* Call explore */
-    char *r1 = cbm_mcp_handle_tool(srv, "explore",
-                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    char *r1 = cbm_mcp_handle_tool(srv, "explore", "{\"project\":\"impact\",\"area\":\"Order\"}");
     free(r1);
 
     /* Call understand */
@@ -2831,8 +2853,8 @@ TEST(session_accumulates_across_tools) {
     ASSERT_NOT_NULL(ss);
     ASSERT_TRUE(cbm_session_query_count(ss) >= 3);
     ASSERT_TRUE(cbm_session_areas_count(ss) >= 1);
-    ASSERT_TRUE(cbm_session_symbols_count(ss) >= 1);  /* HandleOrder at minimum */
-    ASSERT_TRUE(cbm_session_impacts_count(ss) >= 1);  /* ProcessOrder */
+    ASSERT_TRUE(cbm_session_symbols_count(ss) >= 1); /* HandleOrder at minimum */
+    ASSERT_TRUE(cbm_session_impacts_count(ss) >= 1); /* ProcessOrder */
 
     cbm_mcp_server_free(srv);
     PASS();
@@ -2855,8 +2877,7 @@ TEST(session_hint_explore_area_overlap) {
     ASSERT_NOT_NULL(srv);
 
     /* First explore — should NOT have session_hint about prior exploration */
-    char *r1 = cbm_mcp_handle_tool(srv, "explore",
-                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    char *r1 = cbm_mcp_handle_tool(srv, "explore", "{\"project\":\"impact\",\"area\":\"Order\"}");
     char *t1 = extract_text_content(r1);
     ASSERT_NOT_NULL(t1);
     ASSERT_NULL(strstr(t1, "\"session_hint\""));
@@ -2864,8 +2885,7 @@ TEST(session_hint_explore_area_overlap) {
     free(r1);
 
     /* Second explore same area — should have overlap hint */
-    char *r2 = cbm_mcp_handle_tool(srv, "explore",
-                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    char *r2 = cbm_mcp_handle_tool(srv, "explore", "{\"project\":\"impact\",\"area\":\"Order\"}");
     char *t2 = extract_text_content(r2);
     ASSERT_NOT_NULL(t2);
     ASSERT_NOT_NULL(strstr(t2, "\"session_hint\""));
@@ -2912,8 +2932,8 @@ TEST(session_hint_prepare_change_edited_file) {
     cbm_session_track_file_edited(ss, "app/controllers/OrderController.php");
 
     /* prepare_change for ProcessOrder — OrderController is in its blast radius */
-    char *raw = cbm_mcp_handle_tool(
-        srv, "prepare_change", "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
+    char *raw = cbm_mcp_handle_tool(srv, "prepare_change",
+                                    "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
     ASSERT_NOT_NULL(strstr(text, "\"session_hint\""));
@@ -2982,15 +3002,13 @@ TEST(session_summary_after_tools) {
     ASSERT_NOT_NULL(srv);
 
     /* Call explore + understand to populate session */
-    char *r1 = cbm_mcp_handle_tool(srv, "explore",
-                                   "{\"project\":\"impact\",\"area\":\"Order\"}");
+    char *r1 = cbm_mcp_handle_tool(srv, "explore", "{\"project\":\"impact\",\"area\":\"Order\"}");
     free(r1);
     char *r2 = cbm_mcp_handle_tool(srv, "understand",
                                    "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
     free(r2);
 
-    char *raw = cbm_mcp_handle_tool(srv, "get_session_summary",
-                                    "{\"project\":\"impact\"}");
+    char *raw = cbm_mcp_handle_tool(srv, "get_session_summary", "{\"project\":\"impact\"}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
@@ -3019,8 +3037,7 @@ TEST(session_summary_with_impact) {
                                    "{\"project\":\"impact\",\"symbol\":\"ProcessOrder\"}");
     free(r1);
 
-    char *raw = cbm_mcp_handle_tool(srv, "get_session_summary",
-                                    "{\"project\":\"impact\"}");
+    char *raw = cbm_mcp_handle_tool(srv, "get_session_summary", "{\"project\":\"impact\"}");
     ASSERT_NOT_NULL(raw);
     char *text = extract_text_content(raw);
     ASSERT_NOT_NULL(text);
