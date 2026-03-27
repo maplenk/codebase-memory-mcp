@@ -4638,7 +4638,7 @@ static int summary_count_nodes(cbm_store_t *s, const char *project, const char *
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(s->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         store_set_error_sqlite(s, "summary_count_nodes");
-        return CBM_STORE_ERR;
+        return 0;
     }
     bind_text(stmt, 1, project);
     if (focus_like && focus_like[0]) {

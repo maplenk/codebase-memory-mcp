@@ -349,6 +349,9 @@ static bool markdown_builder_reserve(markdown_builder_t *b, size_t need) {
     while (b->len + need + 1 > b->cap) {
         b->cap *= 2;
         b->buf = safe_realloc(b->buf, b->cap);
+        if (!b->buf) {
+            return false;
+        }
     }
     return true;
 }
@@ -546,6 +549,7 @@ char *cbm_jsonrpc_format_error(int64_t id, int code, const char *message) {
  * ══════════════════════════════════════════════════════════════════ */
 
 char *cbm_mcp_text_result(const char *text, bool is_error) {
+    if (!text) text = "";
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     yyjson_mut_val *root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);
@@ -1331,6 +1335,7 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
 
     char *label = cbm_mcp_get_string_arg(args, "label");
     char *name_pattern = cbm_mcp_get_string_arg(args, "name_pattern");
+    char *qn_pattern = cbm_mcp_get_string_arg(args, "qn_pattern");
     char *file_pattern = cbm_mcp_get_string_arg(args, "file_pattern");
     int limit = cbm_mcp_get_int_arg(args, "limit", 500000);
     int offset = cbm_mcp_get_int_arg(args, "offset", 0);
@@ -1344,6 +1349,7 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
         .project = project,
         .label = label,
         .name_pattern = name_pattern,
+        .qn_pattern = qn_pattern,
         .file_pattern = file_pattern,
         .limit = limit,
         .offset = offset,
@@ -1417,6 +1423,7 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
     free(project);
     free(label);
     free(name_pattern);
+    free(qn_pattern);
     free(file_pattern);
 
     char *result = cbm_mcp_text_result(json, false);
@@ -1699,7 +1706,14 @@ static char *handle_get_key_symbols(cbm_mcp_server_t *srv, const char *args) {
     char *focus = cbm_mcp_get_string_arg(args, "focus");
     int limit = cbm_mcp_get_int_arg(args, "limit", 20);
     cbm_store_t *store = resolve_store(srv, project);
-    REQUIRE_STORE(store, project);
+    if (!store) {
+        char *_err = build_project_list_error("project not found or not indexed");
+        char *_res = cbm_mcp_text_result(_err, true);
+        free(_err);
+        free(project);
+        free(focus);
+        return _res;
+    }
 
     char *not_indexed = verify_project_indexed(store, project);
     if (not_indexed) {
