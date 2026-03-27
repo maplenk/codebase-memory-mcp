@@ -65,6 +65,9 @@
 #define JSONRPC_PARSE_ERROR (-32700)
 #define JSONRPC_METHOD_NOT_FOUND (-32601)
 
+/* Default file limit for auto-indexing new projects */
+#define DEFAULT_AUTO_INDEX_LIMIT 50000
+
 /* ── Helpers ────────────────────────────────────────────────────── */
 
 static char *heap_strdup(const char *s) {
@@ -801,7 +804,8 @@ static const tool_def_t TOOLS[] = {
      "optional focus filtering and output size control.",
      "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\",\"description\":"
      "\"Indexed project name (from list_projects).\"},\"project_path\":{\"type\":\"string\","
-     "\"description\":\"Deprecated alias: path to the indexed project.\"},\"max_tokens\":{"
+     "\"description\":\"Repo path — seeds session root for auto-indexing when project is unknown."
+     "\"},\"max_tokens\":{"
      "\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output size. Controls "
      "detail level.\"},\"focus\":{\"type\":\"string\",\"description\":\"Optional domain keyword "
      "to zoom into (for example payment or inventory).\"}},\"anyOf\":[{\"required\":["
@@ -1156,9 +1160,13 @@ struct cbm_mcp_server {
     bool update_thread_active; /* true if update thread was started and needs joining */
 
     /* Session + auto-index state */
-    char session_root[1024];     /* detected project root path */
-    char session_project[256];   /* derived project name */
-    bool session_detected;       /* true after first detection attempt */
+    char session_root[1024];         /* detected project root path (from getcwd) */
+    char session_project[256];       /* primary project name (from session_root) */
+    char session_project_alt[256];   /* alternate project name covering symlink variants:
+                                      *   detect_session: alt = from $PWD (logical path)
+                                      *   set_session_root: alt = from realpath (canonical)
+                                      * try_auto_index checks both for matching. */
+    bool session_detected;           /* true after first detection attempt */
     struct cbm_watcher *watcher; /* external watcher ref (not owned) */
     struct cbm_config *config;   /* external config ref (not owned) */
     cbm_thread_t autoindex_tid;
@@ -1229,6 +1237,33 @@ void cbm_mcp_server_set_watcher(cbm_mcp_server_t *srv, struct cbm_watcher *w) {
 void cbm_mcp_server_set_config(cbm_mcp_server_t *srv, struct cbm_config *cfg) {
     if (srv) {
         srv->config = cfg;
+    }
+}
+
+void cbm_mcp_server_set_session_root(cbm_mcp_server_t *srv, const char *repo_path) {
+    if (srv && repo_path) {
+        srv->session_project_alt[0] = '\0'; /* clear stale alt from prior call */
+        snprintf(srv->session_root, sizeof(srv->session_root), "%s", repo_path);
+        char *pname = cbm_project_name_from_path(repo_path);
+        if (pname) {
+            snprintf(srv->session_project, sizeof(srv->session_project), "%s", pname);
+            free(pname);
+        }
+        /* Also derive alt project name from the canonical path if it differs */
+        char resolved[4096];
+#ifdef _WIN32
+        bool got_resolved = _fullpath(resolved, repo_path, sizeof(resolved)) != NULL;
+#else
+        bool got_resolved = realpath(repo_path, resolved) != NULL;
+#endif
+        if (got_resolved && strcmp(resolved, repo_path) != 0) {
+            char *alt = cbm_project_name_from_path(resolved);
+            if (alt && strcmp(alt, srv->session_project) != 0) {
+                snprintf(srv->session_project_alt, sizeof(srv->session_project_alt), "%s", alt);
+            }
+            free(alt);
+        }
+        srv->session_detected = true;
     }
 }
 
@@ -1534,15 +1569,242 @@ static char *verify_project_indexed(cbm_store_t *store, const char *project) {
     return NULL;
 }
 
+/* ── Auto-index on first tool call ─────────────────────────────── */
+
+/* Forward declaration — defined later in the file */
+static void detect_session(cbm_mcp_server_t *srv);
+
+/* try_auto_index — resolve store, auto-indexing if needed.
+ * Note: MCP is single-threaded (event loop), so no concurrent-call guard needed.
+ * Returns a valid store pointer on success.
+ * On failure, sets *err_out to a heap-allocated MCP error response and returns NULL.
+ * Caller must free *err_out when non-NULL.
+ * When auto-indexing is triggered and the caller's project name is the symlink
+ * variant (session_project_alt), *project_ptr is replaced with the canonical
+ * session_project so subsequent queries match the DB. */
+static cbm_store_t *try_auto_index(cbm_mcp_server_t *srv, char **project_ptr, char **err_out) {
+    *err_out = NULL;
+    const char *project = *project_ptr;
+
+    /* Fast path: store exists and is indexed */
+    cbm_store_t *store = resolve_store(srv, project);
+    if (store) {
+        char *check = verify_project_indexed(store, project);
+        if (!check) {
+            return store; /* Indexed — ready */
+        }
+        free(check); /* DB exists but empty — fall through to auto-index */
+    }
+
+    /* Ensure session metadata is populated (CWD detection).
+     * In MCP mode this happens during initialize; in CLI mode it may not
+     * have run yet, so we call it lazily here. */
+    if (!srv->session_detected) {
+        detect_session(srv);
+    }
+
+    /* Can we auto-index? Need session_root + matching project name.
+     * Check both session_project (from getcwd) and session_project_alt (from $PWD)
+     * to handle symlinks (e.g., macOS /tmp → /private/tmp). */
+    bool project_matches = false;
+    if (project && srv->session_project[0] != '\0') {
+        project_matches = strcmp(srv->session_project, project) == 0 ||
+                          (srv->session_project_alt[0] != '\0' &&
+                           strcmp(srv->session_project_alt, project) == 0);
+    }
+    if (srv->session_root[0] == '\0' || !project || !project_matches) {
+        /* Not auto-indexable — return the standard project-list error */
+        char *_err = build_project_list_error(
+            store ? "project not indexed" : "project not found or not indexed");
+        *err_out = cbm_mcp_text_result(_err, true);
+        free(_err);
+        return NULL;
+    }
+
+    /* From this point the project name matches the session.  Use the canonical
+     * name (session_project) for all DB operations — the pipeline writes the
+     * .db under that name, and resolve_store opens by project name. */
+    const char *canonical = srv->session_project;
+
+    /* When the caller used the alt name, the fast path above tried to open
+     * <alt>.db which doesn't exist.  Check the canonical name before
+     * falling through to a full re-index. */
+    if (strcmp(project, canonical) != 0) {
+        store = resolve_store(srv, canonical);
+        if (store) {
+            char *check = verify_project_indexed(store, canonical);
+            if (!check) {
+                goto update_project; /* Already indexed under canonical name */
+            }
+            free(check);
+        }
+    }
+
+    /* If background auto-index is already running, wait for it instead of
+     * starting a second index pass. After it finishes, re-resolve the store. */
+    if (srv->autoindex_active) {
+        cbm_log_info("autoindex.inline.wait", "project", canonical);
+        cbm_thread_join(&srv->autoindex_tid);
+        srv->autoindex_active = false;
+
+        /* Invalidate cache and re-resolve — background thread wrote the .db */
+        if (srv->owns_store && srv->store) {
+            cbm_store_close(srv->store);
+            srv->store = NULL;
+        }
+        free(srv->current_project);
+        srv->current_project = NULL;
+
+        store = resolve_store(srv, canonical);
+        if (store) {
+            char *check = verify_project_indexed(store, canonical);
+            if (!check) {
+                goto update_project; /* Background index succeeded */
+            }
+            free(check);
+        }
+        /* Background index failed or incomplete — fall through to inline index */
+    }
+
+    /* Respect auto_index config and file limit.
+     * If no config is attached (CLI mode), lazily open the persisted config
+     * so `codebase-memory-mcp config set auto_index true` is honored. */
+    bool auto_index_enabled = false;
+    int file_limit = DEFAULT_AUTO_INDEX_LIMIT;
+    cbm_config_t *lazy_cfg = NULL;
+    cbm_config_t *cfg = (cbm_config_t *)srv->config;
+    if (!cfg) {
+        const char *home = cbm_get_home_dir();
+        if (home) {
+            char cfg_dir[1024];
+            snprintf(cfg_dir, sizeof(cfg_dir), "%s/.cache/codebase-memory-mcp", home);
+            lazy_cfg = cbm_config_open(cfg_dir);
+            cfg = lazy_cfg;
+        }
+    }
+    if (cfg) {
+        auto_index_enabled =
+            cbm_config_get_bool(cfg, CBM_CONFIG_AUTO_INDEX, false);
+        file_limit =
+            cbm_config_get_int(cfg, CBM_CONFIG_AUTO_INDEX_LIMIT, DEFAULT_AUTO_INDEX_LIMIT);
+    }
+    if (lazy_cfg) {
+        cbm_config_close(lazy_cfg);
+    }
+    if (!auto_index_enabled) {
+        char *_err = build_project_list_error(
+            "project not indexed; auto_index is disabled. "
+            "Run 'index_repository' or 'codebase-memory-mcp config set auto_index true' to enable");
+        *err_out = cbm_mcp_text_result(_err, true);
+        free(_err);
+        return NULL;
+    }
+
+    /* Quick file count check to avoid OOM on large repos */
+    if (!cbm_validate_shell_arg(srv->session_root)) {
+        *err_out = cbm_mcp_text_result(
+            "auto-index failed: session path contains unsafe characters", true);
+        return NULL;
+    }
+    {
+        char cmd[1024];
+        snprintf(cmd, sizeof(cmd), "git -C '%s' ls-files 2>/dev/null | wc -l",
+                 srv->session_root);
+        // NOLINTNEXTLINE(bugprone-command-processor,cert-env33-c)
+        FILE *fp = cbm_popen(cmd, "r");
+        if (fp) {
+            char line[64];
+            if (fgets(line, sizeof(line), fp)) {
+                int count = (int)strtol(line, NULL, 10);
+                if (count > file_limit) {
+                    cbm_pclose(fp);
+                    char msg[256];
+                    snprintf(msg, sizeof(msg),
+                             "project has %d files (limit: %d) — run index_repository manually"
+                             " or increase auto_index_limit",
+                             count, file_limit);
+                    *err_out = cbm_mcp_text_result(msg, true);
+                    return NULL;
+                }
+            }
+            cbm_pclose(fp);
+        }
+    }
+
+    /* Run pipeline synchronously */
+    cbm_log_info("autoindex.inline", "project", project, "path", srv->session_root);
+
+    cbm_pipeline_t *p = cbm_pipeline_new(srv->session_root, NULL, CBM_MODE_FULL);
+    if (!p) {
+        *err_out = cbm_mcp_text_result(
+            "auto-index failed: could not create pipeline", true);
+        return NULL;
+    }
+
+    cbm_pipeline_lock();
+    int rc = cbm_pipeline_run(p);
+    cbm_pipeline_unlock();
+    cbm_pipeline_free(p);
+    cbm_mem_collect(); /* return mimalloc pages to OS after indexing */
+
+    if (rc != 0) {
+        *err_out = cbm_mcp_text_result(
+            "auto-index failed: pipeline error", true);
+        return NULL;
+    }
+
+    /* Invalidate cached store and re-resolve from the fresh .db.
+     * The pipeline writes <session_project>.db (from session_root), so always
+     * reopen with the canonical session_project — not the caller's project name
+     * which may be the alt variant (e.g., "tmp-repo" vs "private-tmp-repo"). */
+    if (srv->owns_store && srv->store) {
+        cbm_store_close(srv->store);
+        srv->store = NULL;
+    }
+    free(srv->current_project);
+    srv->current_project = NULL;
+
+    store = resolve_store(srv, canonical);
+    if (!store) {
+        *err_out = cbm_mcp_text_result(
+            "auto-index completed but store could not be opened", true);
+        return NULL;
+    }
+
+    /* Final verification */
+    char *check = verify_project_indexed(store, canonical);
+    if (check) {
+        *err_out = check;
+        return NULL;
+    }
+
+    /* Register with watcher for ongoing change detection */
+    if (srv->watcher) {
+        cbm_watcher_watch(srv->watcher, srv->session_project, srv->session_root);
+    }
+
+    cbm_log_info("autoindex.done", "project", canonical);
+
+update_project:
+    /* If the caller used the symlink variant (alt name), replace it with
+     * the canonical name so subsequent DB queries match. */
+    if (strcmp(*project_ptr, canonical) != 0) {
+        char *new_proj = heap_strdup(canonical);
+        if (new_proj) {
+            free(*project_ptr);
+            *project_ptr = new_proj;
+        }
+    }
+    return store;
+}
+
 static char *handle_get_graph_schema(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
-    cbm_store_t *store = resolve_store(srv, project);
-    REQUIRE_STORE(store, project);
-
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
+    if (!store) {
         free(project);
-        return not_indexed;
+        return auto_err;
     }
 
     cbm_schema_info_t schema = {0};
@@ -1600,13 +1862,11 @@ static char *handle_get_graph_schema(cbm_mcp_server_t *srv, const char *args) {
 
 static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
-    cbm_store_t *store = resolve_store(srv, project);
-    REQUIRE_STORE(store, project);
-
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
+    if (!store) {
         free(project);
-        return not_indexed;
+        return auto_err;
     }
 
     char *label = cbm_mcp_get_string_arg(args, "label");
@@ -1735,7 +1995,6 @@ static char *handle_search_graph(cbm_mcp_server_t *srv, const char *args) {
 static char *handle_query_graph(cbm_mcp_server_t *srv, const char *args) {
     char *query = cbm_mcp_get_string_arg(args, "query");
     char *project = cbm_mcp_get_string_arg(args, "project");
-    cbm_store_t *store = resolve_store(srv, project);
     int max_rows = cbm_mcp_get_int_arg(args, "max_rows", 0);
     int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", DEFAULT_MAX_TOKENS);
     size_t char_budget = max_tokens_to_char_budget(max_tokens);
@@ -1744,20 +2003,12 @@ static char *handle_query_graph(cbm_mcp_server_t *srv, const char *args) {
         free(project);
         return cbm_mcp_text_result("query is required", true);
     }
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
     if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
         free(project);
         free(query);
-        return _res;
-    }
-
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
-        free(project);
-        free(query);
-        return not_indexed;
+        return auto_err;
     }
 
     cbm_cypher_result_t result = {0};
@@ -1852,6 +2103,8 @@ static char *handle_query_graph(cbm_mcp_server_t *srv, const char *args) {
     return res;
 }
 
+/* index_status intentionally uses REQUIRE_STORE instead of try_auto_index —
+ * a status check should report "not indexed", not trigger indexing. */
 static char *handle_index_status(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
     cbm_store_t *store = resolve_store(srv, project);
@@ -1938,13 +2191,11 @@ static char *handle_delete_project(cbm_mcp_server_t *srv, const char *args) {
 
 static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
-    cbm_store_t *store = resolve_store(srv, project);
-    REQUIRE_STORE(store, project);
-
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
+    if (!store) {
         free(project);
-        return not_indexed;
+        return auto_err;
     }
 
     cbm_schema_info_t schema = {0};
@@ -2006,21 +2257,12 @@ static char *handle_get_key_symbols(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
     char *focus = cbm_mcp_get_string_arg(args, "focus");
     int limit = cbm_mcp_get_int_arg(args, "limit", 20);
-    cbm_store_t *store = resolve_store(srv, project);
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
     if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
         free(project);
         free(focus);
-        return _res;
-    }
-
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
-        free(project);
-        free(focus);
-        return not_indexed;
+        return auto_err;
     }
 
     cbm_key_symbol_t *symbols = NULL;
@@ -2073,26 +2315,17 @@ static char *handle_get_impact_analysis(cbm_mcp_server_t *srv, const char *args)
     bool include_tests = cbm_mcp_get_bool_arg_default(args, "include_tests", true);
     int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", DEFAULT_MAX_TOKENS);
     size_t char_budget = max_tokens_to_char_budget(max_tokens);
-    cbm_store_t *store = resolve_store(srv, project);
 
     if (!symbol) {
         free(project);
         return cbm_mcp_text_result("symbol is required", true);
     }
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
     if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
         free(project);
         free(symbol);
-        return _res;
-    }
-
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
-        free(project);
-        free(symbol);
-        return not_indexed;
+        return auto_err;
     }
 
     /* Session tracking */
@@ -2308,15 +2541,19 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
         }
     }
 
-    cbm_store_t *store = resolve_store(srv, project);
+    /* If project_path was given, seed session_root so try_auto_index can
+     * match the project and index from the right directory. */
+    if (project_path && srv->session_root[0] == '\0') {
+        cbm_mcp_server_set_session_root(srv, project_path);
+    }
+
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
     if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
         free(project);
         free(project_path);
         free(focus);
-        return _res;
+        return auto_err;
     }
 
     cbm_project_t proj_info = {0};
@@ -2507,7 +2744,6 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
 static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     char *func_name = cbm_mcp_get_string_arg(args, "function_name");
     char *project = cbm_mcp_get_string_arg(args, "project");
-    cbm_store_t *store = resolve_store(srv, project);
     char *direction = cbm_mcp_get_string_arg(args, "direction");
     int depth = cbm_mcp_get_int_arg(args, "depth", 3);
     int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", DEFAULT_MAX_TOKENS);
@@ -2525,26 +2761,15 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         free(user_edge_types);
         return cbm_mcp_text_result("function_name is required", true);
     }
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
     if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
         free(func_name);
         free(project);
         free(direction);
         for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
         free(user_edge_types);
-        return _res;
-    }
-
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
-        free(func_name);
-        free(project);
-        free(direction);
-        for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
-        free(user_edge_types);
-        return not_indexed;
+        return auto_err;
     }
 
     /* Session tracking */
@@ -3163,21 +3388,12 @@ static char *handle_get_code_snippet(cbm_mcp_server_t *srv, const char *args) {
         return cbm_mcp_text_result("qualified_name is required", true);
     }
 
-    cbm_store_t *store = resolve_store(srv, project);
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
     if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
         free(qn);
         free(project);
-        return _res;
-    }
-
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
-        free(qn);
-        free(project);
-        return not_indexed;
+        return auto_err;
     }
 
     /* Default to current project (same as all other tools) */
@@ -4036,27 +4252,19 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     char *area = cbm_mcp_get_string_arg(args, "area");
     int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", DEFAULT_MAX_TOKENS);
     size_t char_budget = max_tokens_to_char_budget(max_tokens);
-    cbm_store_t *store = resolve_store(srv, project);
 
     if (!area || !area[0]) {
         free(project);
         free(area);
         return cbm_mcp_text_result("area is required", true);
     }
-    if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
-        free(project);
-        free(area);
-        return _res;
-    }
 
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
+    if (!store) {
         free(project);
         free(area);
-        return not_indexed;
+        return auto_err;
     }
 
     /* Session tracking: check area overlap BEFORE tracking */
@@ -4297,27 +4505,19 @@ static char *handle_understand(cbm_mcp_server_t *srv, const char *args) {
     char *symbol = cbm_mcp_get_string_arg(args, "symbol");
     int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", DEFAULT_MAX_TOKENS);
     size_t char_budget = max_tokens_to_char_budget(max_tokens);
-    cbm_store_t *store = resolve_store(srv, project);
 
     if (!symbol || !symbol[0]) {
         free(project);
         free(symbol);
         return cbm_mcp_text_result("symbol is required", true);
     }
-    if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
-        free(project);
-        free(symbol);
-        return _res;
-    }
 
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
+    if (!store) {
         free(project);
         free(symbol);
-        return not_indexed;
+        return auto_err;
     }
 
     /* Session tracking: check BEFORE tracking for hint */
@@ -4665,7 +4865,6 @@ static char *handle_prepare_change(cbm_mcp_server_t *srv, const char *args) {
     bool include_tests = cbm_mcp_get_bool_arg_default(args, "include_tests", true);
     int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", DEFAULT_MAX_TOKENS);
     size_t char_budget = max_tokens_to_char_budget(max_tokens);
-    cbm_store_t *store = resolve_store(srv, project);
     char *result = NULL;
     char *pc_hint = NULL;
 
@@ -4674,20 +4873,13 @@ static char *handle_prepare_change(cbm_mcp_server_t *srv, const char *args) {
         free(symbol);
         return cbm_mcp_text_result("symbol is required", true);
     }
-    if (!store) {
-        char *_err = build_project_list_error("project not found or not indexed");
-        char *_res = cbm_mcp_text_result(_err, true);
-        free(_err);
-        free(project);
-        free(symbol);
-        return _res;
-    }
 
-    char *not_indexed = verify_project_indexed(store, project);
-    if (not_indexed) {
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
+    if (!store) {
         free(project);
         free(symbol);
-        return not_indexed;
+        return auto_err;
     }
 
     /* Session tracking */
@@ -5233,6 +5425,17 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
         return _res;
     }
 
+    /* Ensure project is indexed so get_project_root and file scoping work */
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
+    if (!store) {
+        free(pattern);
+        free(project);
+        free(file_pattern);
+        if (has_path_filter) cbm_regfree(&path_regex);
+        return auto_err;
+    }
+
     char *root_path = get_project_root(srv, project);
     if (!root_path) {
         free(pattern);
@@ -5288,11 +5491,10 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
     snprintf(filelist, sizeof(filelist), "%s.files", tmpfile);
     bool scoped = false;
 
-    cbm_store_t *pre_store = resolve_store(srv, project);
-    if (pre_store) {
+    if (store) {
         char **indexed_files = NULL;
         int indexed_count = 0;
-        if (cbm_store_list_files(pre_store, project, &indexed_files, &indexed_count) ==
+        if (cbm_store_list_files(store, project, &indexed_files, &indexed_count) ==
                 CBM_STORE_OK &&
             indexed_count > 0) {
             FILE *fl = fopen(filelist, "w");
@@ -5387,8 +5589,6 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
     /* ── Phase 2+3: Block expansion + graph ranking ──────────── */
     /* Sort grep matches by file for contiguous processing.
      * Then: one SQL query per unique file for nodes, one batch query for all degrees. */
-
-    cbm_store_t *store = resolve_store(srv, project);
 
     int sr_cap = 32;
     int sr_count = 0;
@@ -6574,6 +6774,24 @@ static void detect_session(cbm_mcp_server_t *srv) {
             free(pname);
         }
     }
+
+    /* On macOS, getcwd() returns the physical path (/private/tmp/...) while
+     * $PWD preserves symlinks (/tmp/...). If they differ, store an alternate
+     * project name so auto-index matches either variant. */
+    const char *pwd = getenv("PWD");
+    if (pwd && srv->session_root[0] && strcmp(pwd, srv->session_root) != 0) {
+        const char *home = cbm_get_home_dir();
+        if (strcmp(pwd, "/") != 0 && (home == NULL || strcmp(pwd, home) != 0)) {
+            char *alt = cbm_project_name_from_path(pwd);
+            if (alt) {
+                if (strcmp(alt, srv->session_project) != 0) {
+                    snprintf(srv->session_project_alt, sizeof(srv->session_project_alt), "%s", alt);
+                    cbm_log_info("session.root.alt", "path", pwd, "project", alt);
+                }
+                free(alt);
+            }
+        }
+    }
 }
 
 /* Background auto-index thread function */
@@ -6631,9 +6849,6 @@ static void maybe_auto_index(cbm_mcp_server_t *srv) {
             return;
         }
     }
-
-/* Default file limit for auto-indexing new projects */
-#define DEFAULT_AUTO_INDEX_LIMIT 50000
 
     /* Check auto_index config */
     bool auto_index = false;

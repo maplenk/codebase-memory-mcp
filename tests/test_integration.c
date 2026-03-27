@@ -12,6 +12,7 @@
 #include <mcp/mcp.h>
 #include <store/store.h>
 #include <pipeline/pipeline.h>
+#include <cli/cli.h>
 #include <foundation/log.h>
 
 #include <string.h>
@@ -796,6 +797,112 @@ TEST(integ_search_graph_dead_code_with_exclude_entry_points) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
+ *  AUTO-INDEX TESTS (separate setup — project NOT pre-indexed)
+ * ══════════════════════════════════════════════════════════════════ */
+
+TEST(integ_auto_index_on_search_graph) {
+    /* Save CWD early so we can restore it even if an assert fires.
+     * All asserts after chdir() must go through the cleanup path. */
+    char orig_cwd[1024];
+    ASSERT_NOT_NULL(getcwd(orig_cwd, sizeof(orig_cwd)));
+
+    /* Create a fresh temp project and a fresh server — do NOT index */
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_autoindex_XXXXXX");
+    ASSERT_NOT_NULL(cbm_mkdtemp(tmpdir));
+
+    /* Write a simple Python file */
+    char path[512];
+    snprintf(path, sizeof(path), "%s/hello.py", tmpdir);
+    FILE *f = fopen(path, "w");
+    ASSERT_NOT_NULL(f);
+    fprintf(f, "def hello():\n    return 'world'\n\ndef main():\n    hello()\n");
+    fclose(f);
+
+    /* Initialize git so the file-count check (git ls-files) works correctly */
+    char git_cmd[512];
+    snprintf(git_cmd, sizeof(git_cmd), "git -C '%s' init -q && git -C '%s' add .", tmpdir, tmpdir);
+    ASSERT_EQ(system(git_cmd), 0);
+
+    /* Derive expected project name */
+    char *proj = cbm_project_name_from_path(tmpdir);
+    ASSERT_NOT_NULL(proj);
+
+    /* Clean up any stale DB from previous test runs */
+    const char *home = getenv("HOME");
+    if (!home) home = "/tmp";
+    char dbpath[512];
+    snprintf(dbpath, sizeof(dbpath), "%s/.cache/codebase-memory-mcp/%s.db", home, proj);
+    unlink(dbpath);
+
+    /* chdir into the temp project so detect_session() picks it up naturally.
+     * From this point, ALL exits must restore CWD. */
+    ASSERT_EQ(chdir(tmpdir), 0);
+
+    /* Create server — detect_session() will be called lazily by try_auto_index */
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+
+    /* Enable auto_index via config in a temp directory (avoid polluting real HOME config) */
+    char cfg_dir[512];
+    snprintf(cfg_dir, sizeof(cfg_dir), "%s/cfg", tmpdir);
+    cbm_mkdir(cfg_dir);
+    cbm_config_t *cfg = cbm_config_open(cfg_dir);
+    if (cfg) {
+        cbm_config_set(cfg, "auto_index", "true");
+        cbm_mcp_server_set_config(srv, (struct cbm_config *)cfg);
+    }
+
+    /* The project name must match what detect_session derives from getcwd().
+     * On macOS getcwd() may resolve /tmp → /private/tmp, so re-derive here. */
+    char cwd_check[1024];
+    char *cwd_proj = NULL;
+    if (getcwd(cwd_check, sizeof(cwd_check))) {
+        cwd_proj = cbm_project_name_from_path(cwd_check);
+    }
+    const char *query_proj = cwd_proj ? cwd_proj : proj;
+
+    /* Also clean up the DB for the resolved project name if it differs */
+    if (cwd_proj && strcmp(cwd_proj, proj) != 0) {
+        char dbpath2[512];
+        snprintf(dbpath2, sizeof(dbpath2), "%s/.cache/codebase-memory-mcp/%s.db", home, cwd_proj);
+        unlink(dbpath2);
+    }
+
+    /* Call search_graph WITHOUT indexing first — should auto-index */
+    char args[512];
+    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"label\":\"Function\",\"limit\":10}",
+             query_proj);
+    char *resp = srv ? cbm_mcp_handle_tool(srv, "search_graph", args) : NULL;
+
+    /* Restore CWD BEFORE asserting — ensures subsequent tests aren't affected */
+    (void)chdir(orig_cwd);
+
+    /* Now assert on results */
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "hello")); /* our function should be found */
+    ASSERT_TRUE(strstr(resp, "not indexed") == NULL); /* no error */
+    free(resp);
+
+    /* Cleanup */
+    if (srv) cbm_mcp_server_free(srv);
+    if (cfg) cbm_config_close(cfg);
+
+    /* Clean up DB files for both project name variants */
+    unlink(dbpath);
+    if (cwd_proj && strcmp(cwd_proj, proj) != 0) {
+        char dbpath2[512];
+        snprintf(dbpath2, sizeof(dbpath2), "%s/.cache/codebase-memory-mcp/%s.db", home, cwd_proj);
+        unlink(dbpath2);
+    }
+    free(cwd_proj);
+    free(proj);
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+    (void)system(cmd);
+    PASS();
+}
+
+/* ══════════════════════════════════════════════════════════════════
  *  SUITE
  * ══════════════════════════════════════════════════════════════════ */
 
@@ -860,4 +967,7 @@ SUITE(integration) {
 
     /* Teardown */
     integration_teardown();
+
+    /* Auto-index tests (own setup, no dependency on above) */
+    RUN_TEST(integ_auto_index_on_search_graph);
 }
