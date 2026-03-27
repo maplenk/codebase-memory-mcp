@@ -1160,15 +1160,15 @@ struct cbm_mcp_server {
     bool update_thread_active; /* true if update thread was started and needs joining */
 
     /* Session + auto-index state */
-    char session_root[1024];         /* detected project root path (from getcwd) */
-    char session_project[256];       /* primary project name (from session_root) */
-    char session_project_alt[256];   /* alternate project name covering symlink variants:
-                                      *   detect_session: alt = from $PWD (logical path)
-                                      *   set_session_root: alt = from realpath (canonical)
-                                      * try_auto_index checks both for matching. */
-    bool session_detected;           /* true after first detection attempt */
-    struct cbm_watcher *watcher; /* external watcher ref (not owned) */
-    struct cbm_config *config;   /* external config ref (not owned) */
+    char session_root[1024];       /* detected project root path (from getcwd) */
+    char session_project[256];     /* primary project name (from session_root) */
+    char session_project_alt[256]; /* alternate project name covering symlink variants:
+                                    *   detect_session: alt = from $PWD (logical path)
+                                    *   set_session_root: alt = from realpath (canonical)
+                                    * try_auto_index checks both for matching. */
+    bool session_detected;         /* true after first detection attempt */
+    struct cbm_watcher *watcher;   /* external watcher ref (not owned) */
+    struct cbm_config *config;     /* external config ref (not owned) */
     cbm_thread_t autoindex_tid;
     bool autoindex_active; /* true if auto-index thread was started */
 
@@ -1608,14 +1608,14 @@ static cbm_store_t *try_auto_index(cbm_mcp_server_t *srv, char **project_ptr, ch
      * to handle symlinks (e.g., macOS /tmp → /private/tmp). */
     bool project_matches = false;
     if (project && srv->session_project[0] != '\0') {
-        project_matches = strcmp(srv->session_project, project) == 0 ||
-                          (srv->session_project_alt[0] != '\0' &&
-                           strcmp(srv->session_project_alt, project) == 0);
+        project_matches =
+            strcmp(srv->session_project, project) == 0 ||
+            (srv->session_project_alt[0] != '\0' && strcmp(srv->session_project_alt, project) == 0);
     }
     if (srv->session_root[0] == '\0' || !project || !project_matches) {
         /* Not auto-indexable — return the standard project-list error */
-        char *_err = build_project_list_error(
-            store ? "project not indexed" : "project not found or not indexed");
+        char *_err = build_project_list_error(store ? "project not indexed"
+                                                    : "project not found or not indexed");
         *err_out = cbm_mcp_text_result(_err, true);
         free(_err);
         return NULL;
@@ -1683,10 +1683,8 @@ static cbm_store_t *try_auto_index(cbm_mcp_server_t *srv, char **project_ptr, ch
         }
     }
     if (cfg) {
-        auto_index_enabled =
-            cbm_config_get_bool(cfg, CBM_CONFIG_AUTO_INDEX, false);
-        file_limit =
-            cbm_config_get_int(cfg, CBM_CONFIG_AUTO_INDEX_LIMIT, DEFAULT_AUTO_INDEX_LIMIT);
+        auto_index_enabled = cbm_config_get_bool(cfg, CBM_CONFIG_AUTO_INDEX, false);
+        file_limit = cbm_config_get_int(cfg, CBM_CONFIG_AUTO_INDEX_LIMIT, DEFAULT_AUTO_INDEX_LIMIT);
     }
     if (lazy_cfg) {
         cbm_config_close(lazy_cfg);
@@ -1702,14 +1700,13 @@ static cbm_store_t *try_auto_index(cbm_mcp_server_t *srv, char **project_ptr, ch
 
     /* Quick file count check to avoid OOM on large repos */
     if (!cbm_validate_shell_arg(srv->session_root)) {
-        *err_out = cbm_mcp_text_result(
-            "auto-index failed: session path contains unsafe characters", true);
+        *err_out =
+            cbm_mcp_text_result("auto-index failed: session path contains unsafe characters", true);
         return NULL;
     }
     {
         char cmd[1024];
-        snprintf(cmd, sizeof(cmd), "git -C '%s' ls-files 2>/dev/null | wc -l",
-                 srv->session_root);
+        snprintf(cmd, sizeof(cmd), "git -C '%s' ls-files 2>/dev/null | wc -l", srv->session_root);
         // NOLINTNEXTLINE(bugprone-command-processor,cert-env33-c)
         FILE *fp = cbm_popen(cmd, "r");
         if (fp) {
@@ -1736,8 +1733,7 @@ static cbm_store_t *try_auto_index(cbm_mcp_server_t *srv, char **project_ptr, ch
 
     cbm_pipeline_t *p = cbm_pipeline_new(srv->session_root, NULL, CBM_MODE_FULL);
     if (!p) {
-        *err_out = cbm_mcp_text_result(
-            "auto-index failed: could not create pipeline", true);
+        *err_out = cbm_mcp_text_result("auto-index failed: could not create pipeline", true);
         return NULL;
     }
 
@@ -1748,8 +1744,7 @@ static cbm_store_t *try_auto_index(cbm_mcp_server_t *srv, char **project_ptr, ch
     cbm_mem_collect(); /* return mimalloc pages to OS after indexing */
 
     if (rc != 0) {
-        *err_out = cbm_mcp_text_result(
-            "auto-index failed: pipeline error", true);
+        *err_out = cbm_mcp_text_result("auto-index failed: pipeline error", true);
         return NULL;
     }
 
@@ -1766,8 +1761,7 @@ static cbm_store_t *try_auto_index(cbm_mcp_server_t *srv, char **project_ptr, ch
 
     store = resolve_store(srv, canonical);
     if (!store) {
-        *err_out = cbm_mcp_text_result(
-            "auto-index completed but store could not be opened", true);
+        *err_out = cbm_mcp_text_result("auto-index completed but store could not be opened", true);
         return NULL;
     }
 
@@ -2752,12 +2746,14 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
 
     /* Extract edge_types array; fall back to {"CALLS"} if not provided */
     int user_edge_type_count = 0;
-    char **user_edge_types = cbm_mcp_get_string_array_arg(args, "edge_types", &user_edge_type_count);
+    char **user_edge_types =
+        cbm_mcp_get_string_array_arg(args, "edge_types", &user_edge_type_count);
 
     if (!func_name) {
         free(project);
         free(direction);
-        for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+        for (int i = 0; i < user_edge_type_count; i++)
+            free(user_edge_types[i]);
         free(user_edge_types);
         return cbm_mcp_text_result("function_name is required", true);
     }
@@ -2767,7 +2763,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         free(func_name);
         free(project);
         free(direction);
-        for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+        for (int i = 0; i < user_edge_type_count; i++)
+            free(user_edge_types[i]);
         free(user_edge_types);
         return auto_err;
     }
@@ -2792,7 +2789,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
         free(func_name);
         free(project);
         free(direction);
-        for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+        for (int i = 0; i < user_edge_type_count; i++)
+            free(user_edge_types[i]);
         free(user_edge_types);
         cbm_store_free_nodes(nodes, 0);
         return cbm_mcp_text_result("{\"error\":\"function not found\"}", true);
@@ -2981,7 +2979,8 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     free(func_name);
     free(project);
     free(direction);
-    for (int i = 0; i < user_edge_type_count; i++) free(user_edge_types[i]);
+    for (int i = 0; i < user_edge_type_count; i++)
+        free(user_edge_types[i]);
     free(user_edge_types);
 
     char *result = cbm_mcp_text_result(json, false);
@@ -5432,7 +5431,8 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
         free(pattern);
         free(project);
         free(file_pattern);
-        if (has_path_filter) cbm_regfree(&path_regex);
+        if (has_path_filter)
+            cbm_regfree(&path_regex);
         return auto_err;
     }
 
@@ -5494,8 +5494,7 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
     if (store) {
         char **indexed_files = NULL;
         int indexed_count = 0;
-        if (cbm_store_list_files(store, project, &indexed_files, &indexed_count) ==
-                CBM_STORE_OK &&
+        if (cbm_store_list_files(store, project, &indexed_files, &indexed_count) == CBM_STORE_OK &&
             indexed_count > 0) {
             FILE *fl = fopen(filelist, "w");
             if (fl) {

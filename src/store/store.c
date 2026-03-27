@@ -2569,8 +2569,7 @@ int cbm_store_search(cbm_store_t *s, const cbm_search_params_t *params, cbm_sear
          * (in_deg=0, out_deg>0). Preserves dead code (in_deg=0, out_deg=0) and
          * called functions (in_deg>0) so max_degree=0 queries still work. */
         if (params->exclude_entry_points) {
-            strncat(sql, " AND NOT (in_deg = 0 AND out_deg > 0)",
-                    sizeof(sql) - strlen(sql) - 1);
+            strncat(sql, " AND NOT (in_deg = 0 AND out_deg > 0)", sizeof(sql) - strlen(sql) - 1);
         }
     }
 
