@@ -543,7 +543,8 @@ TEST(lang_name_unknown) {
 /* These tests need temp files with content markers */
 TEST(lang_m_objc) {
     /* Write a temp file with Objective-C markers */
-    char path[256]; snprintf(path, sizeof(path), "%s/test_lang_objc.m", cbm_tmpdir());
+    char path[256];
+    snprintf(path, sizeof(path), "%s/test_lang_objc.m", cbm_tmpdir());
     FILE *f = fopen(path, "w");
     ASSERT_NOT_NULL(f);
     fprintf(f, "#import <Foundation/Foundation.h>\n@interface Foo : NSObject\n@end\n");
@@ -555,7 +556,8 @@ TEST(lang_m_objc) {
 }
 
 TEST(lang_m_magma) {
-    char path[256]; snprintf(path, sizeof(path), "%s/test_lang_magma.m", cbm_tmpdir());
+    char path[256];
+    snprintf(path, sizeof(path), "%s/test_lang_magma.m", cbm_tmpdir());
     FILE *f = fopen(path, "w");
     ASSERT_NOT_NULL(f);
     fprintf(f, "function MyFunc(x)\n  return x^2;\nend function;\n");
@@ -567,7 +569,8 @@ TEST(lang_m_magma) {
 }
 
 TEST(lang_m_matlab) {
-    char path[256]; snprintf(path, sizeof(path), "%s/test_lang_matlab.m", cbm_tmpdir());
+    char path[256];
+    snprintf(path, sizeof(path), "%s/test_lang_matlab.m", cbm_tmpdir());
     FILE *f = fopen(path, "w");
     ASSERT_NOT_NULL(f);
     fprintf(f, "function y = square(x)\n  y = x.^2;\nend\n");

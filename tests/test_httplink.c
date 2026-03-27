@@ -549,7 +549,8 @@ TEST(httplink_load_config_default) {
 
 TEST(httplink_load_config_from_file) {
     /* Create temp dir with .cgrconfig */
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/httplink-cfg-XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/httplink-cfg-XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("cbm_mkdtemp failed");
 
@@ -589,7 +590,8 @@ TEST(httplink_load_config_from_file) {
 
 TEST(httplink_load_config_invalid_yaml) {
     /* Invalid YAML → fallback to defaults */
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/httplink-bad-XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/httplink-bad-XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("cbm_mkdtemp failed");
 
@@ -719,7 +721,8 @@ TEST(httplink_route_extraction_negative_cases) {
 
 TEST(httplink_read_source_lines) {
     /* Create temp dir with test file */
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/httplink-test-XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/httplink-test-XXXXXX");
     if (!cbm_mkdtemp(tmpdir)) {
         printf("  SKIP: cbm_mkdtemp failed\n");
         return -1;
@@ -787,18 +790,17 @@ TEST(httplink_laravel_path_filter) {
     int n;
 
     /* Cache key patterns should be filtered (contain $ or :) */
-    n = cbm_extract_laravel_routes("fn", "proj.fn",
-                                   "Cache::get('article:{$this->id}:image')", routes, 8);
+    n = cbm_extract_laravel_routes("fn", "proj.fn", "Cache::get('article:{$this->id}:image')",
+                                   routes, 8);
     ASSERT_EQ(n, 0);
 
-    n = cbm_extract_laravel_routes("fn", "proj.fn",
-                                   "Route::get(\"cache:$key\", fn() => null)", routes, 8);
+    n = cbm_extract_laravel_routes("fn", "proj.fn", "Route::get(\"cache:$key\", fn() => null)",
+                                   routes, 8);
     ASSERT_EQ(n, 0);
 
     /* Valid routes should still pass (Laravel uses {param} not $param) */
-    n = cbm_extract_laravel_routes("fn", "proj.fn",
-                                   "Route::get('/api/users/{id}', 'UserController@show')", routes,
-                                   8);
+    n = cbm_extract_laravel_routes(
+        "fn", "proj.fn", "Route::get('/api/users/{id}', 'UserController@show')", routes, 8);
     ASSERT_EQ(n, 1);
     ASSERT_STR_EQ(routes[0].path, "/api/users/{id}");
 

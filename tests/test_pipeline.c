@@ -3345,8 +3345,8 @@ TEST(infra_is_kustomize_file) {
 
 TEST(infra_is_k8s_manifest) {
     const char *deploy = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n";
-    const char *plain  = "name: foo\nvalue: bar\n";
-    const char *kust   = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n";
+    const char *plain = "name: foo\nvalue: bar\n";
+    const char *kust = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n";
 
     ASSERT(cbm_is_k8s_manifest("deployment.yaml", deploy));
     ASSERT(!cbm_is_k8s_manifest("deployment.yaml", plain));
@@ -4168,15 +4168,13 @@ TEST(infra_pipeline_idempotent) {
 /* ── K8s / Kustomize extraction tests ──────────────────────────── */
 
 TEST(k8s_extract_kustomize) {
-    const char *src =
-        "apiVersion: kustomize.config.k8s.io/v1beta1\n"
-        "kind: Kustomization\n"
-        "resources:\n"
-        "  - deployment.yaml\n"
-        "  - service.yaml\n";
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_KUSTOMIZE,
-                                        "myproj", "base/kustomization.yaml",
-                                        0, NULL, NULL);
+    const char *src = "apiVersion: kustomize.config.k8s.io/v1beta1\n"
+                      "kind: Kustomization\n"
+                      "resources:\n"
+                      "  - deployment.yaml\n"
+                      "  - service.yaml\n";
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_KUSTOMIZE, "myproj",
+                                        "base/kustomization.yaml", 0, NULL, NULL);
     ASSERT(r != NULL);
     ASSERT_GTE(r->imports.count, 2);
 
@@ -4197,24 +4195,20 @@ TEST(k8s_extract_kustomize) {
 }
 
 TEST(k8s_extract_manifest) {
-    const char *src =
-        "apiVersion: apps/v1\n"
-        "kind: Deployment\n"
-        "metadata:\n"
-        "  name: my-app\n"
-        "  namespace: production\n";
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S,
-                                        "myproj", "k8s/deployment.yaml",
-                                        0, NULL, NULL);
+    const char *src = "apiVersion: apps/v1\n"
+                      "kind: Deployment\n"
+                      "metadata:\n"
+                      "  name: my-app\n"
+                      "  namespace: production\n";
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S, "myproj",
+                                        "k8s/deployment.yaml", 0, NULL, NULL);
     ASSERT(r != NULL);
     ASSERT_GTE(r->defs.count, 1);
 
     bool found_resource = false;
     for (int d = 0; d < r->defs.count; d++) {
-        if (r->defs.items[d].label &&
-            strcmp(r->defs.items[d].label, "Resource") == 0 &&
-            r->defs.items[d].name &&
-            strstr(r->defs.items[d].name, "Deployment") != NULL)
+        if (r->defs.items[d].label && strcmp(r->defs.items[d].label, "Resource") == 0 &&
+            r->defs.items[d].name && strstr(r->defs.items[d].name, "Deployment") != NULL)
             found_resource = true;
     }
     ASSERT_TRUE(found_resource);
@@ -4225,8 +4219,8 @@ TEST(k8s_extract_manifest) {
 
 TEST(k8s_extract_manifest_no_name) {
     const char *src = "apiVersion: apps/v1\nkind: Deployment\n";
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S,
-                                        "myproj", "k8s/deploy.yaml", 0, NULL, NULL);
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S, "myproj",
+                                        "k8s/deploy.yaml", 0, NULL, NULL);
     ASSERT(r != NULL);
     /* No crash — defs count may be 0 because metadata.name is absent */
     ASSERT(!r->has_error);
@@ -4244,18 +4238,17 @@ TEST(k8s_extract_manifest_multidoc) {
      * Note: with some tree-sitter YAML grammar versions the root stream may
      * expose both documents as siblings; the break still fires after the first
      * successful def push, so defs.count must be exactly 1. */
-    const char *src =
-        "apiVersion: apps/v1\n"
-        "kind: Deployment\n"
-        "metadata:\n"
-        "  name: my-app\n"
-        "---\n"
-        "apiVersion: v1\n"
-        "kind: Service\n"
-        "metadata:\n"
-        "  name: my-svc\n";
-    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S,
-                                        "myproj", "k8s/multi.yaml", 0, NULL, NULL);
+    const char *src = "apiVersion: apps/v1\n"
+                      "kind: Deployment\n"
+                      "metadata:\n"
+                      "  name: my-app\n"
+                      "---\n"
+                      "apiVersion: v1\n"
+                      "kind: Service\n"
+                      "metadata:\n"
+                      "  name: my-svc\n";
+    CBMFileResult *r = cbm_extract_file(src, (int)strlen(src), CBM_LANG_K8S, "myproj",
+                                        "k8s/multi.yaml", 0, NULL, NULL);
     ASSERT(r != NULL);
     ASSERT(!r->has_error);
     /* First document's resource must be present */
@@ -4316,7 +4309,8 @@ static int has_binding_value(const cbm_env_binding_t *bindings, int count, const
 }
 
 TEST(envscan_dockerfile_env_urls) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_dock_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_dock_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4345,7 +4339,8 @@ TEST(envscan_dockerfile_env_urls) {
 }
 
 TEST(envscan_shell_env_urls) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_sh_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_sh_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4372,7 +4367,8 @@ TEST(envscan_shell_env_urls) {
 }
 
 TEST(envscan_env_file_urls) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_env_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_env_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4398,7 +4394,8 @@ TEST(envscan_env_file_urls) {
 }
 
 TEST(envscan_toml_urls) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_toml_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_toml_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4425,7 +4422,8 @@ TEST(envscan_toml_urls) {
 }
 
 TEST(envscan_yaml_urls) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_yaml_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_yaml_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4450,7 +4448,8 @@ TEST(envscan_yaml_urls) {
 }
 
 TEST(envscan_terraform_urls) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_tf_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_tf_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4476,7 +4475,8 @@ TEST(envscan_terraform_urls) {
 }
 
 TEST(envscan_properties_urls) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_prop_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_prop_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4498,7 +4498,8 @@ TEST(envscan_properties_urls) {
 }
 
 TEST(envscan_secret_key_exclusion) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_skey_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_skey_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4526,7 +4527,8 @@ TEST(envscan_secret_key_exclusion) {
 }
 
 TEST(envscan_secret_value_exclusion) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_sval_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_sval_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4551,7 +4553,8 @@ TEST(envscan_secret_value_exclusion) {
 }
 
 TEST(envscan_secret_file_exclusion) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_sfile_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_sfile_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4584,7 +4587,8 @@ TEST(envscan_secret_file_exclusion) {
 }
 
 TEST(envscan_skips_ignored_dirs) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_ign_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_ign_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4632,7 +4636,8 @@ TEST(envscan_skips_ignored_dirs) {
 }
 
 TEST(envscan_non_url_values_skipped) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_nurl_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_envscan_nurl_XXXXXX");
     if (!cbm_mkdtemp(tmpdir))
         SKIP("tmpdir");
 
@@ -4855,14 +4860,18 @@ static int setup_incremental_repo(void) {
     /* main.go — calls Helper() */
     snprintf(path, sizeof(path), "%s/main.go", g_incr_tmpdir);
     f = fopen(path, "w");
-    if (!f) { return -1; }
+    if (!f) {
+        return -1;
+    }
     fprintf(f, "package main\n\nfunc main() {\n\tHelper()\n}\n");
     fclose(f);
 
     /* helper.go — defines Helper() */
     snprintf(path, sizeof(path), "%s/helper.go", g_incr_tmpdir);
     f = fopen(path, "w");
-    if (!f) { return -1; }
+    if (!f) {
+        return -1;
+    }
     fprintf(f, "package main\n\nfunc Helper() string {\n\treturn \"hello\"\n}\n");
     fclose(f);
 
@@ -4883,15 +4892,14 @@ TEST(pipeline_fastapi_depends_edges) {
     /* Depends(get_current_user) should produce a CALLS edge from the
      * endpoint to the dependency function. */
     const char *files[] = {"auth.py", "routes.py"};
-    const char *contents[] = {
-        /* auth.py: defines get_current_user */
-        "def get_current_user(token: str):\n"
-        "    return decode_token(token)\n",
-        /* routes.py: endpoint depends on get_current_user */
-        "from fastapi import Depends\n"
-        "from auth import get_current_user\n\n"
-        "def get_profile(user = Depends(get_current_user)):\n"
-        "    return {\"user\": user}\n"};
+    const char *contents[] = {/* auth.py: defines get_current_user */
+                              "def get_current_user(token: str):\n"
+                              "    return decode_token(token)\n",
+                              /* routes.py: endpoint depends on get_current_user */
+                              "from fastapi import Depends\n"
+                              "from auth import get_current_user\n\n"
+                              "def get_profile(user = Depends(get_current_user)):\n"
+                              "    return {\"user\": user}\n"};
     if (setup_lang_repo(files, contents, 2) != 0) {
         SKIP("tmpdir");
     }
@@ -4912,8 +4920,7 @@ TEST(pipeline_fastapi_depends_edges) {
 
     bool found_depends_edge = false;
     for (int i = 0; i < edge_count; i++) {
-        if (edges[i].properties_json &&
-            strstr(edges[i].properties_json, "fastapi_depends")) {
+        if (edges[i].properties_json && strstr(edges[i].properties_json, "fastapi_depends")) {
             found_depends_edge = true;
             break;
         }
@@ -4938,7 +4945,9 @@ TEST(pipeline_fastapi_depends_edges) {
 
 TEST(incremental_full_then_noop) {
     /* Full index, then re-run → should detect no changes and skip */
-    if (setup_incremental_repo() != 0) { SKIP("setup failed"); }
+    if (setup_incremental_repo() != 0) {
+        SKIP("setup failed");
+    }
 
     /* First: full index */
     cbm_pipeline_t *p = cbm_pipeline_new(g_incr_tmpdir, g_incr_dbpath, CBM_MODE_FULL);
@@ -4973,7 +4982,9 @@ TEST(incremental_full_then_noop) {
 }
 
 TEST(incremental_noop_backfills_pagerank) {
-    if (setup_incremental_repo() != 0) { SKIP("setup failed"); }
+    if (setup_incremental_repo() != 0) {
+        SKIP("setup failed");
+    }
 
     cbm_pipeline_t *p = cbm_pipeline_new(g_incr_tmpdir, g_incr_dbpath, CBM_MODE_FULL);
     ASSERT_NOT_NULL(p);
@@ -4996,8 +5007,8 @@ TEST(incremental_noop_backfills_pagerank) {
     ASSERT_NOT_NULL(s);
     sqlite3_stmt *stmt = NULL;
     ASSERT_EQ(sqlite3_prepare_v2(cbm_store_get_db(s),
-                                 "SELECT COUNT(*) FROM node_scores WHERE project = ?1;", -1,
-                                 &stmt, NULL),
+                                 "SELECT COUNT(*) FROM node_scores WHERE project = ?1;", -1, &stmt,
+                                 NULL),
               SQLITE_OK);
     ASSERT_EQ(sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC), SQLITE_OK);
     ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
@@ -5012,7 +5023,9 @@ TEST(incremental_noop_backfills_pagerank) {
 
 TEST(incremental_detects_changed_file) {
     /* Full index, modify one file, re-index → changed file re-parsed */
-    if (setup_incremental_repo() != 0) { SKIP("setup failed"); }
+    if (setup_incremental_repo() != 0) {
+        SKIP("setup failed");
+    }
 
     /* First: full index */
     cbm_pipeline_t *p = cbm_pipeline_new(g_incr_tmpdir, g_incr_dbpath, CBM_MODE_FULL);
@@ -5051,7 +5064,9 @@ TEST(incremental_detects_changed_file) {
 
 TEST(incremental_detects_deleted_file) {
     /* Full index, delete a file, re-index → deleted file's nodes removed */
-    if (setup_incremental_repo() != 0) { SKIP("setup failed"); }
+    if (setup_incremental_repo() != 0) {
+        SKIP("setup failed");
+    }
 
     /* First: full index */
     cbm_pipeline_t *p = cbm_pipeline_new(g_incr_tmpdir, g_incr_dbpath, CBM_MODE_FULL);
@@ -5085,7 +5100,9 @@ TEST(incremental_detects_deleted_file) {
 
 TEST(incremental_new_file_added) {
     /* Full index, add a new file, re-index → new file's nodes appear */
-    if (setup_incremental_repo() != 0) { SKIP("setup failed"); }
+    if (setup_incremental_repo() != 0) {
+        SKIP("setup failed");
+    }
 
     /* First: full index */
     cbm_pipeline_t *p = cbm_pipeline_new(g_incr_tmpdir, g_incr_dbpath, CBM_MODE_FULL);
@@ -5484,12 +5501,12 @@ TEST(env_var_name_valid) {
 
 TEST(env_var_name_invalid) {
     /* Invalid: too short, lowercase, mixed case, empty */
-    ASSERT_FALSE(cbm_is_env_var_name("A"));       /* single char */
-    ASSERT_FALSE(cbm_is_env_var_name("port"));    /* lowercase */
-    ASSERT_FALSE(cbm_is_env_var_name("apiKey"));  /* camelCase */
-    ASSERT_FALSE(cbm_is_env_var_name("__"));      /* no uppercase */
-    ASSERT_FALSE(cbm_is_env_var_name(""));        /* empty */
-    ASSERT_FALSE(cbm_is_env_var_name("123"));     /* digits only */
+    ASSERT_FALSE(cbm_is_env_var_name("A"));      /* single char */
+    ASSERT_FALSE(cbm_is_env_var_name("port"));   /* lowercase */
+    ASSERT_FALSE(cbm_is_env_var_name("apiKey")); /* camelCase */
+    ASSERT_FALSE(cbm_is_env_var_name("__"));     /* no uppercase */
+    ASSERT_FALSE(cbm_is_env_var_name(""));       /* empty */
+    ASSERT_FALSE(cbm_is_env_var_name("123"));    /* digits only */
     PASS();
 }
 
@@ -5525,7 +5542,8 @@ TEST(split_camel_basic) {
     ASSERT_STR_EQ(parts[0], "get");
     ASSERT_STR_EQ(parts[1], "Camel");
     ASSERT_STR_EQ(parts[2], "Case");
-    for (int i = 0; i < n; i++) free(parts[i]);
+    for (int i = 0; i < n; i++)
+        free(parts[i]);
 
     PASS();
 }
@@ -5536,7 +5554,8 @@ TEST(split_camel_single_word) {
     int n = cbm_split_camel_case("hello", parts, 16);
     ASSERT_EQ(n, 1);
     ASSERT_STR_EQ(parts[0], "hello");
-    for (int i = 0; i < n; i++) free(parts[i]);
+    for (int i = 0; i < n; i++)
+        free(parts[i]);
     PASS();
 }
 
@@ -5544,7 +5563,8 @@ TEST(split_camel_empty) {
     /* Empty string — should return 0 or 1 empty part */
     char *parts[16];
     int n = cbm_split_camel_case("", parts, 16);
-    for (int i = 0; i < n; i++) free(parts[i]);
+    for (int i = 0; i < n; i++)
+        free(parts[i]);
     /* Either 0 parts or 1 empty part is acceptable */
     ASSERT_TRUE(n >= 0 && n <= 1);
     PASS();
@@ -5557,7 +5577,8 @@ TEST(tokenize_decorator_login_required) {
     ASSERT_EQ(n, 2);
     ASSERT_STR_EQ(tokens[0], "login");
     ASSERT_STR_EQ(tokens[1], "required");
-    for (int i = 0; i < n; i++) free(tokens[i]);
+    for (int i = 0; i < n; i++)
+        free(tokens[i]);
     PASS();
 }
 
@@ -5567,7 +5588,8 @@ TEST(tokenize_decorator_single) {
     int n = cbm_tokenize_decorator("@Override", tokens, 16);
     ASSERT_EQ(n, 1);
     ASSERT_STR_EQ(tokens[0], "override");
-    for (int i = 0; i < n; i++) free(tokens[i]);
+    for (int i = 0; i < n; i++)
+        free(tokens[i]);
     PASS();
 }
 
@@ -5581,7 +5603,8 @@ TEST(split_command_basic) {
     ASSERT_STR_EQ(args[2], "main.c");
     ASSERT_STR_EQ(args[3], "-o");
     ASSERT_STR_EQ(args[4], "main.o");
-    for (int i = 0; i < n; i++) free(args[i]);
+    for (int i = 0; i < n; i++)
+        free(args[i]);
     PASS();
 }
 
@@ -5591,7 +5614,8 @@ TEST(split_command_quoted) {
     int n = cbm_split_command("gcc -DFOO=\"bar baz\" main.c", args, 16);
     ASSERT_GTE(n, 3);
     ASSERT_STR_EQ(args[0], "gcc");
-    for (int i = 0; i < n; i++) free(args[i]);
+    for (int i = 0; i < n; i++)
+        free(args[i]);
     PASS();
 }
 

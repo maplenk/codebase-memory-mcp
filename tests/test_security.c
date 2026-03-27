@@ -180,8 +180,8 @@ TEST(sqlite_allows_normal_queries) {
     cbm_store_upsert_node(s, &n);
 
     cbm_cypher_result_t r = {0};
-    int rc =
-        cbm_cypher_execute(s, "MATCH (f:Function) WHERE f.name = \"hello\" RETURN f", "test", 0, &r);
+    int rc = cbm_cypher_execute(s, "MATCH (f:Function) WHERE f.name = \"hello\" RETURN f", "test",
+                                0, &r);
     ASSERT_EQ(rc, 0);
     ASSERT_EQ(r.row_count, 1);
 
@@ -225,8 +225,8 @@ TEST(cypher_rejects_union_injection) {
     cbm_store_upsert_project(s, "test", "/tmp/test");
 
     cbm_cypher_result_t r = {0};
-    int rc = cbm_cypher_execute(
-        s, "MATCH (n) RETURN n UNION SELECT sql FROM sqlite_master", "test", 0, &r);
+    int rc = cbm_cypher_execute(s, "MATCH (n) RETURN n UNION SELECT sql FROM sqlite_master", "test",
+                                0, &r);
     /* Cypher parser should reject UNION — it's not valid Cypher */
     ASSERT_NEQ(rc, 0);
     cbm_cypher_result_free(&r);
@@ -262,9 +262,8 @@ TEST(path_traversal_blocked) {
         if (realpath(traversal, real_file)) {
             /* Verify the resolved path does NOT start with root */
             size_t root_len = strlen(real_root);
-            int contained =
-                (strncmp(real_file, real_root, root_len) == 0 &&
-                 (real_file[root_len] == '/' || real_file[root_len] == '\0'));
+            int contained = (strncmp(real_file, real_root, root_len) == 0 &&
+                             (real_file[root_len] == '/' || real_file[root_len] == '\0'));
             ASSERT_FALSE(contained);
         }
         /* If realpath fails, the file doesn't exist — also safe */
@@ -281,9 +280,8 @@ TEST(path_within_root_allowed) {
     const char *root = "/tmp";
     if (realpath(root, real_root) && realpath("/tmp", real_file)) {
         size_t root_len = strlen(real_root);
-        int contained =
-            (strncmp(real_file, real_root, root_len) == 0 &&
-             (real_file[root_len] == '/' || real_file[root_len] == '\0'));
+        int contained = (strncmp(real_file, real_root, root_len) == 0 &&
+                         (real_file[root_len] == '/' || real_file[root_len] == '\0'));
         ASSERT_TRUE(contained);
     }
     PASS();

@@ -754,8 +754,8 @@ TEST(swift_simple_call) {
 }
 
 TEST(swift_method_call) {
-    CBMFileResult *r = extract("class Foo {\n    func bar() { baz.run() }\n}\n", CBM_LANG_SWIFT,
-                               "t", "Foo.swift");
+    CBMFileResult *r =
+        extract("class Foo {\n    func bar() { baz.run() }\n}\n", CBM_LANG_SWIFT, "t", "Foo.swift");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT(has_call(r, "baz.run"));
@@ -1684,10 +1684,10 @@ TEST(go_imports) {
 }
 
 TEST(java_imports) {
-    CBMFileResult *r =
-        extract("import java.util.List;\nimport java.util.ArrayList;\nimport static java.lang.Math.PI;\n"
-                "public class Foo {}\n",
-                CBM_LANG_JAVA, "t", "Foo.java");
+    CBMFileResult *r = extract(
+        "import java.util.List;\nimport java.util.ArrayList;\nimport static java.lang.Math.PI;\n"
+        "public class Foo {}\n",
+        CBM_LANG_JAVA, "t", "Foo.java");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1697,10 +1697,10 @@ TEST(java_imports) {
 }
 
 TEST(rust_imports) {
-    CBMFileResult *r =
-        extract("use std::collections::HashMap;\nuse std::io::{self, Write};\nuse serde::Serialize;\n"
-                "fn main() {}\n",
-                CBM_LANG_RUST, "t", "main.rs");
+    CBMFileResult *r = extract(
+        "use std::collections::HashMap;\nuse std::io::{self, Write};\nuse serde::Serialize;\n"
+        "fn main() {}\n",
+        CBM_LANG_RUST, "t", "main.rs");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1710,9 +1710,9 @@ TEST(rust_imports) {
 }
 
 TEST(c_imports) {
-    CBMFileResult *r =
-        extract("#include <stdio.h>\n#include <stdlib.h>\n#include \"mylib.h\"\n\nint main() { return 0; }\n",
-                CBM_LANG_C, "t", "main.c");
+    CBMFileResult *r = extract("#include <stdio.h>\n#include <stdlib.h>\n#include "
+                               "\"mylib.h\"\n\nint main() { return 0; }\n",
+                               CBM_LANG_C, "t", "main.c");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1722,9 +1722,9 @@ TEST(c_imports) {
 }
 
 TEST(ruby_imports) {
-    CBMFileResult *r =
-        extract("require 'json'\nrequire 'net/http'\nrequire_relative 'helpers'\n\nclass Foo; end\n",
-                CBM_LANG_RUBY, "t", "app.rb");
+    CBMFileResult *r = extract(
+        "require 'json'\nrequire 'net/http'\nrequire_relative 'helpers'\n\nclass Foo; end\n",
+        CBM_LANG_RUBY, "t", "app.rb");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);
@@ -1734,9 +1734,9 @@ TEST(ruby_imports) {
 }
 
 TEST(lua_imports) {
-    CBMFileResult *r =
-        extract("local json = require(\"dkjson\")\nlocal http = require(\"socket.http\")\n\nlocal function greet() end\n",
-                CBM_LANG_LUA, "t", "main.lua");
+    CBMFileResult *r = extract("local json = require(\"dkjson\")\nlocal http = "
+                               "require(\"socket.http\")\n\nlocal function greet() end\n",
+                               CBM_LANG_LUA, "t", "main.lua");
     ASSERT_NOT_NULL(r);
     ASSERT_FALSE(r->has_error);
     ASSERT_GT(r->imports.count, 0);

@@ -163,7 +163,8 @@ TEST(gi_null_safe_free) {
 /* ── Load from file ────────────────────────────────────────────── */
 
 TEST(gi_load_file) {
-    char path[256]; snprintf(path, sizeof(path), "%s/test_gitignore_file", cbm_tmpdir());
+    char path[256];
+    snprintf(path, sizeof(path), "%s/test_gitignore_file", cbm_tmpdir());
     FILE *f = fopen(path, "w");
     ASSERT_NOT_NULL(f);
     fprintf(f, "*.o\nbuild/\n");

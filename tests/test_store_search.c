@@ -56,8 +56,14 @@ static cbm_store_t *setup_pagerank_store(int64_t *ids) {
         {.project = "test", .label = "Function", .name = "Small", .qualified_name = "test.Small"},
         {.project = "test", .label = "Function", .name = "Hub", .qualified_name = "test.Hub"},
         {.project = "test", .label = "Function", .name = "Leaf", .qualified_name = "test.Leaf"},
-        {.project = "test", .label = "Function", .name = "CallerB", .qualified_name = "test.CallerB"},
-        {.project = "test", .label = "Function", .name = "CallerC", .qualified_name = "test.CallerC"},
+        {.project = "test",
+         .label = "Function",
+         .name = "CallerB",
+         .qualified_name = "test.CallerB"},
+        {.project = "test",
+         .label = "Function",
+         .name = "CallerC",
+         .qualified_name = "test.CallerC"},
     };
     const int node_count = (int)(sizeof(nodes) / sizeof(nodes[0]));
     for (int i = 0; i < node_count; i++) {
@@ -706,7 +712,8 @@ TEST(store_dump_to_file) {
     ASSERT_TRUE(id > 0);
 
     /* Dump to temp file */
-    char path[256]; snprintf(path, sizeof(path), "/tmp/cbm_test_dump_XXXXXX");
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/cbm_test_dump_XXXXXX");
     int fd = cbm_mkstemp(path);
     ASSERT_TRUE(fd >= 0);
     close(fd);
@@ -1539,8 +1546,7 @@ TEST(store_get_impact_analysis_medium_risk) {
     ASSERT_STR_EQ(out.risk_score, "medium");
     ASSERT_STR_EQ(out.summary, "1 direct callers, 0 route/entry points, 0 affected tests");
 
-    const cbm_impact_item_t *direct =
-        find_impact_item(out.direct, out.direct_count, "TaskRunner");
+    const cbm_impact_item_t *direct = find_impact_item(out.direct, out.direct_count, "TaskRunner");
     ASSERT_NOT_NULL(direct);
     ASSERT_STR_EQ(direct->type, "caller");
 

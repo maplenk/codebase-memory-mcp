@@ -478,10 +478,8 @@ TEST(store_edge_delete_by_project_preserves_others) {
     int64_t idC = cbm_store_upsert_node(s, &nc);
     int64_t idD = cbm_store_upsert_node(s, &nd);
 
-    cbm_edge_t e1 = {
-        .project = "alpha", .source_id = idA, .target_id = idB, .type = "CALLS"};
-    cbm_edge_t e2 = {
-        .project = "beta", .source_id = idC, .target_id = idD, .type = "CALLS"};
+    cbm_edge_t e1 = {.project = "alpha", .source_id = idA, .target_id = idB, .type = "CALLS"};
+    cbm_edge_t e2 = {.project = "beta", .source_id = idC, .target_id = idD, .type = "CALLS"};
     cbm_store_insert_edge(s, &e1);
     cbm_store_insert_edge(s, &e2);
 
@@ -538,10 +536,7 @@ TEST(store_edge_long_type_string) {
     memset(long_type, 'X', 200);
     long_type[200] = '\0';
 
-    cbm_edge_t e = {.project = "test",
-                    .source_id = ids[0],
-                    .target_id = ids[1],
-                    .type = long_type};
+    cbm_edge_t e = {.project = "test", .source_id = ids[0], .target_id = ids[1], .type = long_type};
     int64_t eid = cbm_store_insert_edge(s, &e);
     ASSERT_GT(eid, 0);
 

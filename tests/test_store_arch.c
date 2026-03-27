@@ -557,9 +557,8 @@ TEST(arch_summary_cluster_entry_fallback) {
                         .label = "Route",
                         .name = "/orders",
                         .qualified_name = "test.routes.orders",
-                        .properties_json =
-                            "{\"method\":\"POST\",\"path\":\"/orders\",\"handler\":"
-                            "\"OrderController@store\"}"};
+                        .properties_json = "{\"method\":\"POST\",\"path\":\"/orders\",\"handler\":"
+                                           "\"OrderController@store\"}"};
     cbm_store_upsert_node(s, &route);
 
     cbm_architecture_summary_t summary;

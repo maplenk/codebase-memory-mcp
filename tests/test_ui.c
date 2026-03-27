@@ -27,7 +27,8 @@ TEST(config_load_defaults) {
     cfg.ui_port = 1234;
 
     /* Use a temp HOME to avoid touching real config */
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
     char *td = cbm_mkdtemp(tmpdir);
     ASSERT_NOT_NULL(td);
 
@@ -49,7 +50,8 @@ TEST(config_load_defaults) {
 }
 
 TEST(config_save_and_reload) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
     char *td = cbm_mkdtemp(tmpdir);
     ASSERT_NOT_NULL(td);
 
@@ -76,7 +78,8 @@ TEST(config_save_and_reload) {
 }
 
 TEST(config_overwrite) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
     char *td = cbm_mkdtemp(tmpdir);
     ASSERT_NOT_NULL(td);
 
@@ -105,7 +108,8 @@ TEST(config_overwrite) {
 }
 
 TEST(config_corrupt_file) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
     char *td = cbm_mkdtemp(tmpdir);
     ASSERT_NOT_NULL(td);
 
@@ -141,7 +145,8 @@ TEST(config_corrupt_file) {
 }
 
 TEST(config_missing_fields) {
-    char tmpdir[256]; snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cbm_test_config_XXXXXX");
     char *td = cbm_mkdtemp(tmpdir);
     ASSERT_NOT_NULL(td);
 

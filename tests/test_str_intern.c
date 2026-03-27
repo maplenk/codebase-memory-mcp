@@ -224,7 +224,7 @@ TEST(intern_bytes_tracking) {
     CBMInternPool *pool = cbm_intern_create();
     ASSERT_EQ(cbm_intern_bytes(pool), 0);
 
-    cbm_intern(pool, "abc");   /* 3 bytes */
+    cbm_intern(pool, "abc"); /* 3 bytes */
     ASSERT_EQ(cbm_intern_bytes(pool), 3);
 
     cbm_intern(pool, "defgh"); /* 5 bytes */
@@ -234,10 +234,10 @@ TEST(intern_bytes_tracking) {
     cbm_intern(pool, "abc");
     ASSERT_EQ(cbm_intern_bytes(pool), 8);
 
-    cbm_intern(pool, "");      /* 0 bytes */
+    cbm_intern(pool, ""); /* 0 bytes */
     ASSERT_EQ(cbm_intern_bytes(pool), 8);
 
-    cbm_intern(pool, "x");     /* 1 byte */
+    cbm_intern(pool, "x"); /* 1 byte */
     ASSERT_EQ(cbm_intern_bytes(pool), 9);
 
     cbm_intern_free(pool);

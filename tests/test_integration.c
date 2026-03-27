@@ -370,8 +370,8 @@ TEST(integ_mcp_get_architecture) {
 
 TEST(integ_mcp_get_architecture_summary) {
     char args[512];
-    snprintf(args, sizeof(args),
-             "{\"project\":\"%s\",\"max_tokens\":1200,\"focus\":\"main\"}", g_project);
+    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"max_tokens\":1200,\"focus\":\"main\"}",
+             g_project);
 
     char *resp = call_tool("get_architecture_summary", args);
     ASSERT_NOT_NULL(resp);
@@ -396,7 +396,8 @@ TEST(integ_mcp_get_key_symbols) {
 
 TEST(integ_mcp_explore) {
     char args[256];
-    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"area\":\"main\",\"max_tokens\":400}", g_project);
+    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"area\":\"main\",\"max_tokens\":400}",
+             g_project);
 
     char *resp = call_tool("explore", args);
     ASSERT_NOT_NULL(resp);
@@ -409,7 +410,8 @@ TEST(integ_mcp_explore) {
 
 TEST(integ_mcp_understand) {
     char args[256];
-    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"symbol\":\"Add\",\"max_tokens\":400}", g_project);
+    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"symbol\":\"Add\",\"max_tokens\":400}",
+             g_project);
 
     char *resp = call_tool("understand", args);
     ASSERT_NOT_NULL(resp);
@@ -438,7 +440,8 @@ TEST(integ_mcp_get_impact_analysis) {
 
 TEST(integ_mcp_prepare_change) {
     char args[256];
-    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"symbol\":\"Add\",\"max_tokens\":400}", g_project);
+    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"symbol\":\"Add\",\"max_tokens\":400}",
+             g_project);
 
     char *resp = call_tool("prepare_change", args);
     ASSERT_NOT_NULL(resp);
@@ -659,15 +662,16 @@ TEST(integ_search_graph_relationship_filter) {
 TEST(integ_search_graph_exclude_entry_points) {
     /* First: get ALL functions */
     char args[512];
-    snprintf(args, sizeof(args),
-             "{\"project\":\"%s\",\"label\":\"Function\",\"limit\":50}", g_project);
+    snprintf(args, sizeof(args), "{\"project\":\"%s\",\"label\":\"Function\",\"limit\":50}",
+             g_project);
     char *resp_all = call_tool("search_graph", args);
     ASSERT_NOT_NULL(resp_all);
 
     /* Then: get functions with exclude_entry_points=true (in_deg > 0 only) */
-    snprintf(args, sizeof(args),
-             "{\"project\":\"%s\",\"exclude_entry_points\":true,\"label\":\"Function\",\"limit\":50}",
-             g_project);
+    snprintf(
+        args, sizeof(args),
+        "{\"project\":\"%s\",\"exclude_entry_points\":true,\"label\":\"Function\",\"limit\":50}",
+        g_project);
     char *resp_filtered = call_tool("search_graph", args);
     ASSERT_NOT_NULL(resp_filtered);
 
@@ -830,7 +834,8 @@ TEST(integ_auto_index_on_search_graph) {
 
     /* Clean up any stale DB from previous test runs */
     const char *home = getenv("HOME");
-    if (!home) home = "/tmp";
+    if (!home)
+        home = "/tmp";
     char dbpath[512];
     snprintf(dbpath, sizeof(dbpath), "%s/.cache/codebase-memory-mcp/%s.db", home, proj);
     unlink(dbpath);
@@ -879,13 +884,15 @@ TEST(integ_auto_index_on_search_graph) {
 
     /* Now assert on results */
     ASSERT_NOT_NULL(resp);
-    ASSERT_NOT_NULL(strstr(resp, "hello")); /* our function should be found */
+    ASSERT_NOT_NULL(strstr(resp, "hello"));           /* our function should be found */
     ASSERT_TRUE(strstr(resp, "not indexed") == NULL); /* no error */
     free(resp);
 
     /* Cleanup */
-    if (srv) cbm_mcp_server_free(srv);
-    if (cfg) cbm_config_close(cfg);
+    if (srv)
+        cbm_mcp_server_free(srv);
+    if (cfg)
+        cbm_config_close(cfg);
 
     /* Clean up DB files for both project name variants */
     unlink(dbpath);

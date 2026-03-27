@@ -664,8 +664,10 @@ static int setup_vmem_test_repo(void) {
         if (!f) {
             return -1;
         }
-        fprintf(f, "package main\n\nfunc F%d() {\n\tprintln(\"hello\")\n}\n\n"
-                   "func G%d() int {\n\treturn F%d() + %d\n}\n", i, i, i, i);
+        fprintf(f,
+                "package main\n\nfunc F%d() {\n\tprintln(\"hello\")\n}\n\n"
+                "func G%d() int {\n\treturn F%d() + %d\n}\n",
+                i, i, i, i);
         fclose(f);
     }
 
@@ -740,8 +742,7 @@ TEST(vmem_parallel_extract_with_slab) {
 
     /* Run parallel extraction with 2 workers — enough to trigger
      * multi-file slab reuse on at least one worker. */
-    int rc = cbm_parallel_extract(&ctx, files, file_count, result_cache,
-                                  &shared_ids, 2);
+    int rc = cbm_parallel_extract(&ctx, files, file_count, result_cache, &shared_ids, 2);
     ASSERT_EQ(rc, 0);
 
     /* Verify extraction produced results */

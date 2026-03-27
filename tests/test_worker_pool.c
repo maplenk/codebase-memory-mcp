@@ -283,7 +283,10 @@ TEST(parallel_for_immediate_return_callback) {
 }
 
 /* Helpers for context_passed_correctly test */
-typedef struct { _Atomic int counter; int magic; } ctx_test_t;
+typedef struct {
+    _Atomic int counter;
+    int magic;
+} ctx_test_t;
 
 static void count_and_verify_worker(int idx, void *vctx) {
     (void)idx;
