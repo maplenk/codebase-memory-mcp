@@ -3082,10 +3082,41 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
         }
     }
 
-    /* Step 4: Compute composite score */
-    for (int i = 0; i < fts_count; i++) {
-        results[i].composite_score = W_PPR * results[i].ppr_score + W_BM25 * results[i].bm25_score +
-                                     W_BETWEENNESS * results[i].betweenness;
+    /* Step 4: Compute composite score with in-degree authority signal.
+     * In-degree (number of incoming edges) is a simplified HITS authority:
+     * nodes called by many others are more important. Stubs from auto-generated
+     * files have 0 in-degree. We normalize to [0,1] and add as a component. */
+    #define W_AUTHORITY 0.10
+    {
+        sqlite3_stmt *id_stmt = NULL;
+        int max_indeg = 1; /* avoid div by zero */
+        int *indeg = calloc((size_t)fts_count, sizeof(int));
+        int id_rc = sqlite3_prepare_v2(s->db,
+            "SELECT COUNT(*) FROM edges WHERE target_id = ?1;",
+            -1, &id_stmt, NULL);
+        if (id_rc == SQLITE_OK && indeg) {
+            for (int i = 0; i < fts_count; i++) {
+                sqlite3_reset(id_stmt);
+                sqlite3_clear_bindings(id_stmt);
+                sqlite3_bind_int64(id_stmt, 1, results[i].node_id);
+                if (sqlite3_step(id_stmt) == SQLITE_ROW) {
+                    indeg[i] = sqlite3_column_int(id_stmt, 0);
+                    if (indeg[i] > max_indeg) max_indeg = indeg[i];
+                }
+            }
+            sqlite3_finalize(id_stmt);
+        } else if (id_stmt) {
+            sqlite3_finalize(id_stmt);
+        }
+        for (int i = 0; i < fts_count; i++) {
+            double auth = indeg ? (double)indeg[i] / (double)max_indeg : 0.0;
+            results[i].composite_score =
+                W_PPR * results[i].ppr_score +
+                W_BM25 * results[i].bm25_score +
+                W_BETWEENNESS * results[i].betweenness +
+                W_AUTHORITY * auth;
+        }
+        free(indeg);
     }
 
     /* Sort by composite score descending */
