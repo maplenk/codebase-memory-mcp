@@ -270,10 +270,61 @@ static int init_schema(cbm_store_t *s) {
                       "  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,"
                       "  node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,"
                       "  pagerank REAL NOT NULL,"
+                      "  betweenness REAL NOT NULL DEFAULT 0,"
                       "  PRIMARY KEY (project, node_id)"
                       ");";
 
     return exec_sql(s, ddl);
+}
+
+/* Migrate existing databases: add columns that may not exist yet. */
+static int migrate_schema(cbm_store_t *s) {
+    /* Check if betweenness column exists in node_scores */
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(s->db, "SELECT betweenness FROM node_scores LIMIT 0;", -1, &stmt,
+                                NULL);
+    if (rc != SQLITE_OK) {
+        /* Column doesn't exist — add it */
+        rc = exec_sql(s, "ALTER TABLE node_scores ADD COLUMN betweenness REAL NOT NULL DEFAULT 0;");
+        if (rc != CBM_STORE_OK) {
+            return rc;
+        }
+    } else {
+        sqlite3_finalize(stmt);
+    }
+    return CBM_STORE_OK;
+}
+
+/* Create FTS5 virtual table for full-text search on nodes. */
+static int create_fts_table(cbm_store_t *s) {
+    const char *fts_ddl =
+        "CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5("
+        "  name, qualified_name, file_path,"
+        "  content=nodes, content_rowid=id,"
+        "  tokenize='unicode61 tokenchars _'"
+        ");";
+    int rc = exec_sql(s, fts_ddl);
+    if (rc != CBM_STORE_OK) {
+        return rc;
+    }
+
+    /* Triggers to keep FTS5 in sync with nodes table */
+    const char *triggers =
+        "CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN"
+        "  INSERT INTO node_fts(rowid, name, qualified_name, file_path)"
+        "    VALUES (new.id, new.name, new.qualified_name, new.file_path);"
+        "END;"
+        "CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN"
+        "  INSERT INTO node_fts(node_fts, rowid, name, qualified_name, file_path)"
+        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path);"
+        "END;"
+        "CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN"
+        "  INSERT INTO node_fts(node_fts, rowid, name, qualified_name, file_path)"
+        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path);"
+        "  INSERT INTO node_fts(rowid, name, qualified_name, file_path)"
+        "    VALUES (new.id, new.name, new.qualified_name, new.file_path);"
+        "END;";
+    return exec_sql(s, triggers);
 }
 
 static int create_user_indexes(cbm_store_t *s) {
@@ -286,7 +337,8 @@ static int create_user_indexes(cbm_store_t *s) {
         "CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(project, type);"
         "CREATE INDEX IF NOT EXISTS idx_edges_target_type ON edges(project, target_id, type);"
         "CREATE INDEX IF NOT EXISTS idx_edges_source_type ON edges(project, source_id, type);"
-        "CREATE INDEX IF NOT EXISTS idx_node_scores_rank ON node_scores(project, pagerank DESC);";
+        "CREATE INDEX IF NOT EXISTS idx_node_scores_rank ON node_scores(project, pagerank DESC);"
+        "CREATE INDEX IF NOT EXISTS idx_node_scores_betweenness ON node_scores(project, betweenness DESC);";
     return exec_sql(s, sql);
 }
 
@@ -440,6 +492,7 @@ static cbm_store_t *store_open_internal(const char *path, bool in_memory) {
                             sqlite_iregexp, NULL, NULL);
 
     if (configure_pragmas(s, in_memory) != CBM_STORE_OK || init_schema(s) != CBM_STORE_OK ||
+        migrate_schema(s) != CBM_STORE_OK || create_fts_table(s) != CBM_STORE_OK ||
         create_user_indexes(s) != CBM_STORE_OK) {
         sqlite3_close(s->db);
         free((void *)s->db_path);
@@ -2103,7 +2156,8 @@ int cbm_store_compute_pagerank(cbm_store_t *s, const char *project, int iteratio
     }
 
     rc = sqlite3_prepare_v2(
-        s->db, "INSERT INTO node_scores (project, node_id, pagerank) VALUES (?1, ?2, ?3);", -1,
+        s->db,
+        "INSERT OR REPLACE INTO node_scores (project, node_id, pagerank) VALUES (?1, ?2, ?3);", -1,
         &insert_stmt, NULL);
     if (rc != SQLITE_OK) {
         store_set_error_sqlite(s, "pagerank.insert");
@@ -2150,6 +2204,879 @@ cleanup:
     free(scores);
     free(next_scores);
     return rc;
+}
+
+/* ── Betweenness Centrality (Brandes' algorithm) ───────────────── */
+
+/* Approximate betweenness centrality. For graphs with >K nodes, samples K
+ * random source vertices. Stores result in node_scores.betweenness column.
+ * Must be called AFTER cbm_store_compute_pagerank (needs node_scores rows). */
+
+#define BETWEENNESS_SAMPLE_K 200
+
+int cbm_store_compute_betweenness(cbm_store_t *s, const char *project) {
+    int rc = CBM_STORE_OK;
+    sqlite3_stmt *stmt = NULL;
+    sqlite3_stmt *update_stmt = NULL;
+    int64_t *node_ids = NULL;
+    int node_count = 0;
+    int node_cap = 0;
+    double *betweenness = NULL;
+
+    /* Adjacency list representation */
+    int *adj_offsets = NULL;  /* adj_offsets[i]..adj_offsets[i+1] = neighbors of i */
+    int *adj_list = NULL;     /* flat neighbor indices */
+    int adj_count = 0;
+    int *out_deg = NULL;
+
+    /* BFS working memory */
+    int *queue = NULL;
+    int *dist = NULL;
+    double *sigma = NULL;
+    double *delta = NULL;
+    int *stack = NULL;
+    int **predecessors = NULL;
+    int *pred_count = NULL;
+    int *pred_cap = NULL;
+
+    if (!s || !s->db || !project) {
+        return CBM_STORE_ERR;
+    }
+
+    /* 1. Load node IDs */
+    rc = sqlite3_prepare_v2(s->db,
+                            "SELECT id FROM nodes "
+                            "WHERE project = ?1 AND label IN ('Function','Method','Class') "
+                            "ORDER BY id;",
+                            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        store_set_error_sqlite(s, "betweenness.nodes");
+        return CBM_STORE_ERR;
+    }
+    bind_text(stmt, 1, project);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (node_count >= node_cap) {
+            node_cap = node_cap > 0 ? node_cap * 2 : 128;
+            node_ids = safe_realloc(node_ids, (size_t)node_cap * sizeof(int64_t));
+        }
+        node_ids[node_count++] = sqlite3_column_int64(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    if (node_count == 0) {
+        return CBM_STORE_OK;
+    }
+
+    /* 2. Build adjacency list from CALLS edges */
+    out_deg = calloc((size_t)node_count, sizeof(int));
+    adj_offsets = calloc((size_t)(node_count + 1), sizeof(int));
+    if (!out_deg || !adj_offsets) {
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+
+    /* First pass: count out-degrees */
+    rc = sqlite3_prepare_v2(s->db,
+                            "SELECT source_id, target_id FROM edges "
+                            "WHERE project = ?1 AND type = 'CALLS' ORDER BY source_id;",
+                            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        store_set_error_sqlite(s, "betweenness.edges1");
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+    bind_text(stmt, 1, project);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int src_idx = pagerank_find_node_index(node_ids, node_count, sqlite3_column_int64(stmt, 0));
+        int dst_idx = pagerank_find_node_index(node_ids, node_count, sqlite3_column_int64(stmt, 1));
+        if (src_idx >= 0 && dst_idx >= 0) {
+            out_deg[src_idx]++;
+            adj_count++;
+        }
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    /* Compute offsets (CSR format) */
+    adj_offsets[0] = 0;
+    for (int i = 0; i < node_count; i++) {
+        adj_offsets[i + 1] = adj_offsets[i] + out_deg[i];
+    }
+
+    /* Second pass: fill adjacency list */
+    adj_list = malloc((size_t)(adj_count > 0 ? adj_count : 1) * sizeof(int));
+    if (!adj_list) {
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+    memset(out_deg, 0, (size_t)node_count * sizeof(int)); /* reuse as insertion counters */
+
+    rc = sqlite3_prepare_v2(s->db,
+                            "SELECT source_id, target_id FROM edges "
+                            "WHERE project = ?1 AND type = 'CALLS' ORDER BY source_id;",
+                            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        store_set_error_sqlite(s, "betweenness.edges2");
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+    bind_text(stmt, 1, project);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int src_idx = pagerank_find_node_index(node_ids, node_count, sqlite3_column_int64(stmt, 0));
+        int dst_idx = pagerank_find_node_index(node_ids, node_count, sqlite3_column_int64(stmt, 1));
+        if (src_idx >= 0 && dst_idx >= 0) {
+            adj_list[adj_offsets[src_idx] + out_deg[src_idx]] = dst_idx;
+            out_deg[src_idx]++;
+        }
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    /* 3. Allocate BFS working memory */
+    betweenness = calloc((size_t)node_count, sizeof(double));
+    queue = malloc((size_t)node_count * sizeof(int));
+    dist = malloc((size_t)node_count * sizeof(int));
+    sigma = malloc((size_t)node_count * sizeof(double));
+    delta = malloc((size_t)node_count * sizeof(double));
+    stack = malloc((size_t)node_count * sizeof(int));
+    predecessors = calloc((size_t)node_count, sizeof(int *));
+    pred_count = calloc((size_t)node_count, sizeof(int));
+    pred_cap = calloc((size_t)node_count, sizeof(int));
+    if (!betweenness || !queue || !dist || !sigma || !delta || !stack || !predecessors ||
+        !pred_count || !pred_cap) {
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+
+    /* 4. Brandes' BFS from each source (or K random samples) */
+    int num_sources = node_count;
+    int *source_order = NULL;
+    if (node_count > BETWEENNESS_SAMPLE_K) {
+        /* Approximate: Fisher-Yates shuffle, take first K */
+        num_sources = BETWEENNESS_SAMPLE_K;
+        source_order = malloc((size_t)node_count * sizeof(int));
+        if (!source_order) {
+            rc = CBM_STORE_ERR;
+            goto cleanup;
+        }
+        for (int i = 0; i < node_count; i++) {
+            source_order[i] = i;
+        }
+        unsigned seed = (unsigned)(node_count ^ 0x5DEECE66D);
+        for (int i = node_count - 1; i > 0; i--) {
+            seed = seed * 1103515245 + 12345;
+            int j = (int)((seed >> 16) % (unsigned)(i + 1));
+            int tmp = source_order[i];
+            source_order[i] = source_order[j];
+            source_order[j] = tmp;
+        }
+    }
+
+    for (int si = 0; si < num_sources; si++) {
+        int src = source_order ? source_order[si] : si;
+
+        /* Initialize BFS */
+        for (int i = 0; i < node_count; i++) {
+            dist[i] = -1;
+            sigma[i] = 0.0;
+            delta[i] = 0.0;
+            pred_count[i] = 0;
+        }
+        int stack_top = 0;
+        int q_head = 0;
+        int q_tail = 0;
+
+        dist[src] = 0;
+        sigma[src] = 1.0;
+        queue[q_tail++] = src;
+
+        /* BFS phase */
+        while (q_head < q_tail) {
+            int v = queue[q_head++];
+            stack[stack_top++] = v;
+
+            for (int ei = adj_offsets[v]; ei < adj_offsets[v + 1]; ei++) {
+                int w = adj_list[ei];
+                /* First visit? */
+                if (dist[w] < 0) {
+                    dist[w] = dist[v] + 1;
+                    queue[q_tail++] = w;
+                }
+                /* Shortest path? */
+                if (dist[w] == dist[v] + 1) {
+                    sigma[w] += sigma[v];
+                    /* Record v as predecessor of w */
+                    if (pred_count[w] >= pred_cap[w]) {
+                        int new_cap = pred_cap[w] > 0 ? pred_cap[w] * 2 : 4;
+                        predecessors[w] = safe_realloc(predecessors[w], (size_t)new_cap * sizeof(int));
+                        pred_cap[w] = new_cap;
+                    }
+                    predecessors[w][pred_count[w]++] = v;
+                }
+            }
+        }
+
+        /* Back-propagation phase */
+        while (stack_top > 0) {
+            int w = stack[--stack_top];
+            for (int pi = 0; pi < pred_count[w]; pi++) {
+                int v = predecessors[w][pi];
+                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w]);
+            }
+            if (w != src) {
+                betweenness[w] += delta[w];
+            }
+        }
+    }
+
+    /* Scale if using approximation */
+    if (source_order && num_sources < node_count) {
+        double scale = (double)node_count / (double)num_sources;
+        for (int i = 0; i < node_count; i++) {
+            betweenness[i] *= scale;
+        }
+        free(source_order);
+        source_order = NULL;
+    }
+
+    /* 5. Normalize to [0,1] range */
+    {
+        double max_bc = 0.0;
+        for (int i = 0; i < node_count; i++) {
+            if (betweenness[i] > max_bc) {
+                max_bc = betweenness[i];
+            }
+        }
+        if (max_bc > 0.0) {
+            for (int i = 0; i < node_count; i++) {
+                betweenness[i] /= max_bc;
+            }
+        }
+    }
+
+    /* 6. Store betweenness in node_scores table */
+    rc = sqlite3_prepare_v2(
+        s->db,
+        "UPDATE node_scores SET betweenness = ?1 WHERE project = ?2 AND node_id = ?3;", -1,
+        &update_stmt, NULL);
+    if (rc != SQLITE_OK) {
+        store_set_error_sqlite(s, "betweenness.update");
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+
+    rc = cbm_store_begin(s);
+    if (rc != CBM_STORE_OK) {
+        goto cleanup;
+    }
+
+    for (int i = 0; i < node_count; i++) {
+        sqlite3_reset(update_stmt);
+        sqlite3_clear_bindings(update_stmt);
+        sqlite3_bind_double(update_stmt, 1, betweenness[i]);
+        bind_text(update_stmt, 2, project);
+        sqlite3_bind_int64(update_stmt, 3, node_ids[i]);
+        if (sqlite3_step(update_stmt) != SQLITE_DONE) {
+            store_set_error_sqlite(s, "betweenness.update");
+            sqlite3_finalize(update_stmt);
+            update_stmt = NULL;
+            cbm_store_rollback(s);
+            rc = CBM_STORE_ERR;
+            goto cleanup;
+        }
+    }
+
+    sqlite3_finalize(update_stmt);
+    update_stmt = NULL;
+    rc = cbm_store_commit(s);
+
+cleanup:
+    if (stmt) {
+        sqlite3_finalize(stmt);
+    }
+    if (update_stmt) {
+        sqlite3_finalize(update_stmt);
+    }
+    if (predecessors) {
+        for (int i = 0; i < node_count; i++) {
+            free(predecessors[i]);
+        }
+    }
+    free(predecessors);
+    free(pred_count);
+    free(pred_cap);
+    free(source_order);
+    free(node_ids);
+    free(betweenness);
+    free(queue);
+    free(dist);
+    free(sigma);
+    free(delta);
+    free(stack);
+    free(out_deg);
+    free(adj_offsets);
+    free(adj_list);
+    return rc;
+}
+
+/* ── Personalized PageRank ──────────────────────────────────────── */
+
+/* Edge type weights for PPR (how much rank flows across each type). */
+static double ppr_edge_weight(const char *type) {
+    if (!type) {
+        return 0.5;
+    }
+    if (strcmp(type, "CALLS") == 0) {
+        return 1.0;
+    }
+    if (strcmp(type, "INHERITS") == 0) {
+        return 0.9;
+    }
+    if (strcmp(type, "HTTP_CALLS") == 0) {
+        return 0.8;
+    }
+    if (strcmp(type, "IMPORTS") == 0) {
+        return 0.7;
+    }
+    if (strcmp(type, "ASYNC_CALLS") == 0) {
+        return 0.6;
+    }
+    if (strcmp(type, "FILE_CHANGES_WITH") == 0) {
+        return 0.5;
+    }
+    if (strcmp(type, "CONFIGURES") == 0) {
+        return 0.3;
+    }
+    return 0.5;
+}
+
+typedef struct {
+    int src_idx;
+    int dst_idx;
+    double weight;
+} cbm_ppr_edge_t;
+
+int cbm_store_compute_personalized_pagerank(cbm_store_t *s, const char *project,
+                                            const int64_t *seed_ids, int seed_count, int iterations,
+                                            double damping, int64_t **out_node_ids,
+                                            double **out_scores, int *out_count) {
+    int rc = CBM_STORE_OK;
+    sqlite3_stmt *stmt = NULL;
+    int64_t *node_ids = NULL;
+    int node_cap = 0;
+    int node_count = 0;
+    cbm_ppr_edge_t *edges = NULL;
+    int edge_cap = 0;
+    int edge_count = 0;
+    double *weighted_out = NULL;
+    double *scores = NULL;
+    double *next_scores = NULL;
+    double *teleport = NULL;
+
+    if (out_node_ids) {
+        *out_node_ids = NULL;
+    }
+    if (out_scores) {
+        *out_scores = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+
+    if (!s || !s->db || !project || !out_node_ids || !out_scores || !out_count) {
+        return CBM_STORE_ERR;
+    }
+    if (iterations <= 0) {
+        iterations = 15;
+    }
+    if (damping <= 0.0 || damping >= 1.0) {
+        damping = 0.85;
+    }
+
+    /* 1. Load all scoreable node IDs (sorted for binary search) */
+    rc = sqlite3_prepare_v2(s->db,
+                            "SELECT id FROM nodes "
+                            "WHERE project = ?1 AND label IN ('Function','Method','Class') "
+                            "ORDER BY id;",
+                            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        store_set_error_sqlite(s, "ppr.nodes");
+        return CBM_STORE_ERR;
+    }
+    bind_text(stmt, 1, project);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (node_count >= node_cap) {
+            node_cap = node_cap > 0 ? node_cap * 2 : 128;
+            node_ids = safe_realloc(node_ids, (size_t)node_cap * sizeof(int64_t));
+        }
+        node_ids[node_count++] = sqlite3_column_int64(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    if (node_count == 0) {
+        *out_count = 0;
+        return CBM_STORE_OK;
+    }
+
+    /* 2. Load ALL edge types with weights */
+    rc = sqlite3_prepare_v2(s->db,
+                            "SELECT source_id, target_id, type FROM edges "
+                            "WHERE project = ?1 ORDER BY source_id;",
+                            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        store_set_error_sqlite(s, "ppr.edges");
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+    bind_text(stmt, 1, project);
+
+    weighted_out = calloc((size_t)node_count, sizeof(double));
+    scores = malloc((size_t)node_count * sizeof(double));
+    next_scores = malloc((size_t)node_count * sizeof(double));
+    teleport = calloc((size_t)node_count, sizeof(double));
+    if (!weighted_out || !scores || !next_scores || !teleport) {
+        store_set_error(s, "ppr: allocation failed");
+        sqlite3_finalize(stmt);
+        stmt = NULL;
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int64_t src_id = sqlite3_column_int64(stmt, 0);
+        int64_t dst_id = sqlite3_column_int64(stmt, 1);
+        const char *type = (const char *)sqlite3_column_text(stmt, 2);
+        int src_idx = pagerank_find_node_index(node_ids, node_count, src_id);
+        int dst_idx = pagerank_find_node_index(node_ids, node_count, dst_id);
+        if (src_idx < 0 || dst_idx < 0) {
+            continue;
+        }
+        double w = ppr_edge_weight(type);
+        if (edge_count >= edge_cap) {
+            edge_cap = edge_cap > 0 ? edge_cap * 2 : 256;
+            edges = safe_realloc(edges, (size_t)edge_cap * sizeof(cbm_ppr_edge_t));
+        }
+        edges[edge_count].src_idx = src_idx;
+        edges[edge_count].dst_idx = dst_idx;
+        edges[edge_count].weight = w;
+        weighted_out[src_idx] += w;
+        edge_count++;
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    /* 3. Build biased teleport vector.
+     * Seed nodes get 100/seed_count, others get 1/node_count.
+     * Then normalize to sum to 1. */
+    {
+        double total = 0.0;
+        double seed_weight = (seed_count > 0) ? (100.0 / (double)seed_count) : 0.0;
+        double other_weight = 1.0 / (double)node_count;
+
+        for (int i = 0; i < node_count; i++) {
+            teleport[i] = other_weight;
+        }
+        for (int si = 0; si < seed_count; si++) {
+            int idx = pagerank_find_node_index(node_ids, node_count, seed_ids[si]);
+            if (idx >= 0) {
+                teleport[idx] = seed_weight;
+            }
+        }
+        for (int i = 0; i < node_count; i++) {
+            total += teleport[i];
+        }
+        if (total > 0.0) {
+            for (int i = 0; i < node_count; i++) {
+                teleport[i] /= total;
+            }
+        }
+    }
+
+    /* 4. Initialize scores to teleport distribution */
+    for (int i = 0; i < node_count; i++) {
+        scores[i] = teleport[i];
+    }
+
+    /* 5. Iterate PPR */
+    for (int iter = 0; iter < iterations; iter++) {
+        /* Accumulate dangling mass (nodes with no outgoing weighted edges) */
+        double dangling_mass = 0.0;
+        for (int i = 0; i < node_count; i++) {
+            if (weighted_out[i] <= 0.0) {
+                dangling_mass += scores[i];
+            }
+        }
+
+        /* Base: teleport + dangling redistribution proportional to teleport */
+        for (int i = 0; i < node_count; i++) {
+            next_scores[i] =
+                (1.0 - damping) * teleport[i] + damping * dangling_mass * teleport[i];
+        }
+
+        /* Edge contributions: weighted flow */
+        for (int e = 0; e < edge_count; e++) {
+            int si = edges[e].src_idx;
+            int di = edges[e].dst_idx;
+            if (weighted_out[si] > 0.0) {
+                next_scores[di] += damping * scores[si] * (edges[e].weight / weighted_out[si]);
+            }
+        }
+
+        /* Swap */
+        {
+            double *tmp = scores;
+            scores = next_scores;
+            next_scores = tmp;
+        }
+    }
+
+    /* 6. Return results */
+    *out_node_ids = node_ids;
+    node_ids = NULL; /* ownership transferred */
+    *out_scores = scores;
+    scores = NULL; /* ownership transferred */
+    *out_count = node_count;
+    rc = CBM_STORE_OK;
+
+cleanup:
+    if (stmt) {
+        sqlite3_finalize(stmt);
+    }
+    free(node_ids);
+    free(edges);
+    free(weighted_out);
+    free(scores);
+    free(next_scores);
+    free(teleport);
+    return rc;
+}
+
+/* ── FTS5 Search ───────────────────────────────────────────────── */
+
+int cbm_store_rebuild_fts(cbm_store_t *s, const char *project) {
+    if (!s || !s->db) {
+        return CBM_STORE_ERR;
+    }
+    /* Rebuild FTS index from nodes table content */
+    int rc = exec_sql(s, "INSERT INTO node_fts(node_fts) VALUES('rebuild');");
+    (void)project; /* FTS table covers all projects — rebuild is global */
+    return rc;
+}
+
+int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query, int limit,
+                         int64_t **out_node_ids, double **out_bm25_scores, int *out_count) {
+    sqlite3_stmt *stmt = NULL;
+    int64_t *ids = NULL;
+    double *scores = NULL;
+    int cap = 0;
+    int n = 0;
+
+    if (out_node_ids) {
+        *out_node_ids = NULL;
+    }
+    if (out_bm25_scores) {
+        *out_bm25_scores = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!s || !s->db || !project || !query || !out_node_ids || !out_bm25_scores || !out_count) {
+        return CBM_STORE_ERR;
+    }
+    if (limit <= 0) {
+        limit = 100;
+    }
+
+    /* Join FTS5 MATCH with nodes table to filter by project.
+     * bm25() returns negative scores (more negative = better match),
+     * we negate to get positive scores. */
+    int rc = sqlite3_prepare_v2(
+        s->db,
+        "SELECT n.id, -bm25(node_fts, 10.0, 5.0, 1.0) AS score "
+        "FROM node_fts f "
+        "JOIN nodes n ON n.id = f.rowid "
+        "WHERE node_fts MATCH ?1 AND n.project = ?2 "
+        "  AND n.label IN ('Function','Method','Class') "
+        "ORDER BY score DESC "
+        "LIMIT ?3;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        store_set_error_sqlite(s, "fts_search");
+        return CBM_STORE_ERR;
+    }
+    /* Convert multi-word queries to FTS5 OR expression:
+     * "payment settlement" → "payment OR settlement"
+     * Single words pass through unchanged. */
+    {
+        size_t qlen = strlen(query);
+        char *fts_query = malloc(qlen * 4 + 1); /* worst case: each char becomes " OR " */
+        if (!fts_query) {
+            sqlite3_finalize(stmt);
+            return CBM_STORE_ERR;
+        }
+        size_t out = 0;
+        bool in_word = false;
+        bool had_word = false;
+        for (size_t qi = 0; qi < qlen; qi++) {
+            char c = query[qi];
+            if (c == ' ' || c == '\t') {
+                if (in_word) {
+                    in_word = false;
+                }
+            } else {
+                if (!in_word) {
+                    if (had_word) {
+                        memcpy(fts_query + out, " OR ", 4);
+                        out += 4;
+                    }
+                    in_word = true;
+                    had_word = true;
+                }
+                fts_query[out++] = c;
+            }
+        }
+        fts_query[out] = '\0';
+        bind_text(stmt, 1, fts_query);
+        free(fts_query);
+    }
+    bind_text(stmt, 2, project);
+    sqlite3_bind_int(stmt, 3, limit);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (n >= cap) {
+            cap = cap > 0 ? cap * 2 : 32;
+            ids = safe_realloc(ids, (size_t)cap * sizeof(int64_t));
+            scores = safe_realloc(scores, (size_t)cap * sizeof(double));
+        }
+        ids[n] = sqlite3_column_int64(stmt, 0);
+        scores[n] = sqlite3_column_double(stmt, 1);
+        n++;
+    }
+    sqlite3_finalize(stmt);
+
+    *out_node_ids = ids;
+    *out_bm25_scores = scores;
+    *out_count = n;
+    return CBM_STORE_OK;
+}
+
+/* ── Composite Ranked Search ───────────────────────────────────── */
+
+/* Weights for composite scoring */
+#define W_PPR     0.35
+#define W_BM25    0.30
+#define W_COCHANGE 0.20
+#define W_BETWEENNESS 0.15
+
+static int ranked_result_cmp(const void *a, const void *b) {
+    const cbm_ranked_result_t *ra = (const cbm_ranked_result_t *)a;
+    const cbm_ranked_result_t *rb = (const cbm_ranked_result_t *)b;
+    if (rb->composite_score > ra->composite_score) {
+        return 1;
+    }
+    if (rb->composite_score < ra->composite_score) {
+        return -1;
+    }
+    return 0;
+}
+
+int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *query,
+                            int max_results, cbm_ranked_result_t **out, int *out_count) {
+    int rc = CBM_STORE_OK;
+    int64_t *fts_ids = NULL;
+    double *fts_scores = NULL;
+    int fts_count = 0;
+    int64_t *ppr_ids = NULL;
+    double *ppr_scores = NULL;
+    int ppr_count = 0;
+    cbm_ranked_result_t *results = NULL;
+
+    if (out) {
+        *out = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!s || !s->db || !project || !query || !out || !out_count) {
+        return CBM_STORE_ERR;
+    }
+    if (max_results <= 0) {
+        max_results = 20;
+    }
+
+    /* Step 1: FTS5 BM25 search — get candidate set (top 100) */
+    rc = cbm_store_fts_search(s, project, query, 100, &fts_ids, &fts_scores, &fts_count);
+    if (rc != CBM_STORE_OK || fts_count == 0) {
+        /* No FTS matches — fall back to name substring search */
+        goto cleanup;
+    }
+
+    /* Normalize BM25 scores to [0,1] */
+    {
+        double max_bm25 = 0.0;
+        for (int i = 0; i < fts_count; i++) {
+            if (fts_scores[i] > max_bm25) {
+                max_bm25 = fts_scores[i];
+            }
+        }
+        if (max_bm25 > 0.0) {
+            for (int i = 0; i < fts_count; i++) {
+                fts_scores[i] /= max_bm25;
+            }
+        }
+    }
+
+    /* Step 2: PPR seeded from top BM25 hits (top 10 seeds) */
+    {
+        int seed_count = fts_count < 10 ? fts_count : 10;
+        rc = cbm_store_compute_personalized_pagerank(s, project, fts_ids, seed_count, 15, 0.85,
+                                                     &ppr_ids, &ppr_scores, &ppr_count);
+        if (rc != CBM_STORE_OK) {
+            goto cleanup;
+        }
+    }
+
+    /* Normalize PPR scores to [0,1] */
+    {
+        double max_ppr = 0.0;
+        for (int i = 0; i < ppr_count; i++) {
+            if (ppr_scores[i] > max_ppr) {
+                max_ppr = ppr_scores[i];
+            }
+        }
+        if (max_ppr > 0.0) {
+            for (int i = 0; i < ppr_count; i++) {
+                ppr_scores[i] /= max_ppr;
+            }
+        }
+    }
+
+    /* Step 3: Build result set from FTS candidates enriched with PPR + betweenness */
+    results = calloc((size_t)fts_count, sizeof(cbm_ranked_result_t));
+    if (!results) {
+        rc = CBM_STORE_ERR;
+        goto cleanup;
+    }
+
+    for (int i = 0; i < fts_count; i++) {
+        int64_t nid = fts_ids[i];
+        results[i].node_id = nid;
+        results[i].bm25_score = fts_scores[i];
+
+        /* Lookup PPR score for this node */
+        results[i].ppr_score = 0.0;
+        if (ppr_ids && ppr_count > 0) {
+            int idx = pagerank_find_node_index(ppr_ids, ppr_count, nid);
+            if (idx >= 0) {
+                results[i].ppr_score = ppr_scores[idx];
+            }
+        }
+    }
+
+    /* Batch-fetch betweenness from node_scores */
+    {
+        sqlite3_stmt *bs = NULL;
+        rc = sqlite3_prepare_v2(s->db,
+                                "SELECT betweenness FROM node_scores "
+                                "WHERE project = ?1 AND node_id = ?2;",
+                                -1, &bs, NULL);
+        if (rc == SQLITE_OK) {
+            for (int i = 0; i < fts_count; i++) {
+                sqlite3_reset(bs);
+                sqlite3_clear_bindings(bs);
+                bind_text(bs, 1, project);
+                sqlite3_bind_int64(bs, 2, results[i].node_id);
+                if (sqlite3_step(bs) == SQLITE_ROW) {
+                    results[i].betweenness = sqlite3_column_double(bs, 0);
+                }
+            }
+            sqlite3_finalize(bs);
+        }
+    }
+
+    /* Fetch node metadata */
+    {
+        sqlite3_stmt *ns = NULL;
+        rc = sqlite3_prepare_v2(s->db,
+                                "SELECT name, qualified_name, label, file_path, start_line, end_line "
+                                "FROM nodes WHERE id = ?1;",
+                                -1, &ns, NULL);
+        if (rc == SQLITE_OK) {
+            for (int i = 0; i < fts_count; i++) {
+                sqlite3_reset(ns);
+                sqlite3_clear_bindings(ns);
+                sqlite3_bind_int64(ns, 1, results[i].node_id);
+                if (sqlite3_step(ns) == SQLITE_ROW) {
+                    results[i].name = heap_strdup((const char *)sqlite3_column_text(ns, 0));
+                    results[i].qualified_name =
+                        heap_strdup((const char *)sqlite3_column_text(ns, 1));
+                    results[i].label = heap_strdup((const char *)sqlite3_column_text(ns, 2));
+                    results[i].file_path = heap_strdup((const char *)sqlite3_column_text(ns, 3));
+                    results[i].start_line = sqlite3_column_int(ns, 4);
+                    results[i].end_line = sqlite3_column_int(ns, 5);
+                }
+            }
+            sqlite3_finalize(ns);
+        }
+    }
+
+    /* Step 4: Compute composite score */
+    for (int i = 0; i < fts_count; i++) {
+        results[i].composite_score = W_PPR * results[i].ppr_score + W_BM25 * results[i].bm25_score +
+                                     W_BETWEENNESS * results[i].betweenness;
+        /* co-change component: use betweenness as proxy for now (co-change proximity
+         * would require the seed file path which we don't have in this API) */
+    }
+
+    /* Sort by composite score descending */
+    qsort(results, (size_t)fts_count, sizeof(cbm_ranked_result_t), ranked_result_cmp);
+
+    /* Trim to max_results */
+    int final_count = fts_count < max_results ? fts_count : max_results;
+
+    /* Free excess results */
+    for (int i = final_count; i < fts_count; i++) {
+        free((void *)results[i].name);
+        free((void *)results[i].qualified_name);
+        free((void *)results[i].label);
+        free((void *)results[i].file_path);
+    }
+
+    *out = results;
+    *out_count = final_count;
+    results = NULL; /* ownership transferred */
+    rc = CBM_STORE_OK;
+
+cleanup:
+    free(fts_ids);
+    free(fts_scores);
+    free(ppr_ids);
+    free(ppr_scores);
+    if (results) {
+        for (int i = 0; i < fts_count; i++) {
+            free((void *)results[i].name);
+            free((void *)results[i].qualified_name);
+            free((void *)results[i].label);
+            free((void *)results[i].file_path);
+        }
+        free(results);
+    }
+    return rc;
+}
+
+void cbm_store_ranked_results_free(cbm_ranked_result_t *results, int count) {
+    if (!results) {
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        free((void *)results[i].name);
+        free((void *)results[i].qualified_name);
+        free((void *)results[i].label);
+        free((void *)results[i].file_path);
+    }
+    free(results);
 }
 
 int cbm_store_get_key_symbols(cbm_store_t *s, const char *project, const char *focus, int limit,
