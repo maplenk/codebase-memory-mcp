@@ -2799,7 +2799,6 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
         "JOIN nodes n ON n.id = f.rowid "
         "WHERE node_fts MATCH ?1 AND n.project = ?2 "
         "  AND n.label IN ('Function','Method','Class') "
-        "  AND n.file_path NOT LIKE '%_ide_helper.php' "
         "ORDER BY score DESC "
         "LIMIT ?3;",
         -1, &stmt, NULL);
@@ -3053,12 +3052,34 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
         }
     }
 
-    /* Step 4: Compute composite score */
-    for (int i = 0; i < fts_count; i++) {
-        results[i].composite_score = W_PPR * results[i].ppr_score + W_BM25 * results[i].bm25_score +
-                                     W_BETWEENNESS * results[i].betweenness;
-        /* co-change component: use betweenness as proxy for now (co-change proximity
-         * would require the seed file path which we don't have in this API) */
+    /* Step 4: Compute composite score with out-degree connectivity bonus.
+     * Nodes with 0 outgoing edges are likely stubs (auto-generated code).
+     * Real functions call other functions → out_degree > 0. */
+    {
+        sqlite3_stmt *od = NULL;
+        int od_rc = sqlite3_prepare_v2(s->db,
+            "SELECT COUNT(*) FROM edges WHERE source_id = ?1;",
+            -1, &od, NULL);
+        for (int i = 0; i < fts_count; i++) {
+            results[i].composite_score =
+                W_PPR * results[i].ppr_score +
+                W_BM25 * results[i].bm25_score +
+                W_BETWEENNESS * results[i].betweenness;
+
+            /* Apply out-degree penalty: nodes with 0 out-edges get 0.2x score */
+            if (od_rc == SQLITE_OK) {
+                sqlite3_reset(od);
+                sqlite3_clear_bindings(od);
+                sqlite3_bind_int64(od, 1, results[i].node_id);
+                if (sqlite3_step(od) == SQLITE_ROW) {
+                    int out_deg = sqlite3_column_int(od, 0);
+                    if (out_deg == 0) {
+                        results[i].composite_score *= 0.2;
+                    }
+                }
+            }
+        }
+        if (od) sqlite3_finalize(od);
     }
 
     /* Sort by composite score descending */
