@@ -2928,9 +2928,9 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
         }
     }
 
-    /* Step 2: PPR seeded from top BM25 hits (top 30 seeds) */
+    /* Step 2: PPR seeded from top BM25 hits (top 10 seeds) */
     {
-        int seed_count = fts_count < 30 ? fts_count : 30;
+        int seed_count = fts_count < 10 ? fts_count : 10;
         rc = cbm_store_compute_personalized_pagerank(s, project, fts_ids, seed_count, 15, 0.85,
                                                      &ppr_ids, &ppr_scores, &ppr_count);
         if (rc != CBM_STORE_OK) {
