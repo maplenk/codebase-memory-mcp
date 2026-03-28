@@ -2794,7 +2794,7 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
      * we negate to get positive scores. */
     int rc = sqlite3_prepare_v2(
         s->db,
-        "SELECT n.id, -bm25(node_fts, 10.0, 5.0, 5.0) AS score "
+        "SELECT n.id, -bm25(node_fts, 10.0, 5.0, 1.0) AS score "
         "FROM node_fts f "
         "JOIN nodes n ON n.id = f.rowid "
         "WHERE node_fts MATCH ?1 AND n.project = ?2 "
