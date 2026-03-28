@@ -2799,6 +2799,7 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
         "JOIN nodes n ON n.id = f.rowid "
         "WHERE node_fts MATCH ?1 AND n.project = ?2 "
         "  AND n.label IN ('Function','Method','Class') "
+        "  AND n.file_path NOT LIKE '%_ide_helper.php' "
         "ORDER BY score DESC "
         "LIMIT ?3;",
         -1, &stmt, NULL);
@@ -2806,12 +2807,14 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
         store_set_error_sqlite(s, "fts_search");
         return CBM_STORE_ERR;
     }
-    /* Convert multi-word queries to FTS5 OR expression:
-     * "payment settlement" → "payment OR settlement"
-     * Single words pass through unchanged. */
+    /* Convert multi-word queries to FTS5 OR expression with prefix matching:
+     * "payment settlement" → "payment* OR settlement*"
+     * Prefix matching lets "payment" match CamelCase tokens like
+     * "PaymentMappingService" (FTS5 lowercases: "paymentmappingservice").
+     * Single words also get prefix: "postOrd" → "postOrd*". */
     {
         size_t qlen = strlen(query);
-        char *fts_query = malloc(qlen * 4 + 1); /* worst case: each char becomes " OR " */
+        char *fts_query = malloc(qlen * 6 + 16); /* extra room for "* OR " per word */
         if (!fts_query) {
             sqlite3_finalize(stmt);
             return CBM_STORE_ERR;
@@ -2823,6 +2826,7 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
             char c = query[qi];
             if (c == ' ' || c == '\t') {
                 if (in_word) {
+                    fts_query[out++] = '*'; /* prefix match */
                     in_word = false;
                 }
             } else {
@@ -2836,6 +2840,9 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
                 }
                 fts_query[out++] = c;
             }
+        }
+        if (in_word) {
+            fts_query[out++] = '*'; /* prefix match for last word */
         }
         fts_query[out] = '\0';
         bind_text(stmt, 1, fts_query);
