@@ -2865,8 +2865,8 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
 /* ── Composite Ranked Search ───────────────────────────────────── */
 
 /* Weights for composite scoring */
-#define W_PPR     0.35
-#define W_BM25    0.30
+#define W_PPR     0.55
+#define W_BM25    0.15
 #define W_COCHANGE 0.20
 #define W_BETWEENNESS 0.15
 
