@@ -2794,7 +2794,7 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
      * we negate to get positive scores. */
     int rc = sqlite3_prepare_v2(
         s->db,
-        "SELECT n.id, -bm25(node_fts, 10.0, 5.0, 1.0) AS score, n.file_path "
+        "SELECT n.id, -bm25(node_fts, 10.0, 5.0, 8.0) AS score, n.file_path "
         "FROM node_fts f "
         "JOIN nodes n ON n.id = f.rowid "
         "WHERE node_fts MATCH ?1 AND n.project = ?2 "
@@ -2876,7 +2876,7 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
 
     /* Per-file cap: prevent any single file from contributing > 5 results.
      * Track (file_path_hash, count) pairs with linear scan. */
-    #define PER_FILE_CAP 5
+    #define PER_FILE_CAP 3
     #define FILE_TRACK_CAP 128
     struct { uint64_t hash; int count; } file_counts[FILE_TRACK_CAP];
     int num_files = 0;
