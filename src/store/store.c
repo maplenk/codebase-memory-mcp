@@ -2537,7 +2537,7 @@ static double ppr_edge_weight(const char *type) {
         return 0.8;
     }
     if (strcmp(type, "IMPORTS") == 0) {
-        return 0.7;
+        return 1.0;
     }
     if (strcmp(type, "ASYNC_CALLS") == 0) {
         return 0.6;
