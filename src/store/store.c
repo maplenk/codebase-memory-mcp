@@ -2811,40 +2811,64 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
      * "payment settlement" → "payment* OR settlement*"
      * Prefix matching lets "payment" match CamelCase tokens like
      * "PaymentMappingService" (FTS5 lowercases: "paymentmappingservice").
-     * Single words also get prefix: "postOrd" → "postOrd*". */
+     * Stop words are filtered to reduce noise. */
     {
+        /* Common English stop words — these generate too much noise in
+         * code search (e.g. "checks*" matches 100s of checkXxx functions). */
+        static const char *stop_words[] = {
+            "a","an","and","are","as","at","be","by","do","for","from",
+            "has","have","how","if","in","is","it","its","of","on","or",
+            "the","that","this","to","was","what","when","where","which",
+            "who","will","with","all","also","but","can","does","each",
+            "end","new","not","out","than","them","then","they","up",
+            "complete","flow","happens","places","checks","creates",
+            "finds","gets","handles","makes","every","there",
+            NULL
+        };
         size_t qlen = strlen(query);
-        char *fts_query = malloc(qlen * 6 + 16); /* extra room for "* OR " per word */
-        if (!fts_query) {
+        /* Tokenize query into words, skip stop words, build FTS5 expression */
+        char *qcopy = malloc(qlen + 1);
+        char *fts_query = malloc(qlen * 6 + 16);
+        if (!qcopy || !fts_query) {
+            free(qcopy); free(fts_query);
             sqlite3_finalize(stmt);
             return CBM_STORE_ERR;
         }
+        memcpy(qcopy, query, qlen + 1);
+
         size_t out = 0;
-        bool in_word = false;
         bool had_word = false;
-        for (size_t qi = 0; qi < qlen; qi++) {
-            char c = query[qi];
-            if (c == ' ' || c == '\t') {
-                if (in_word) {
-                    fts_query[out++] = '*'; /* prefix match */
-                    in_word = false;
-                }
-            } else {
-                if (!in_word) {
-                    if (had_word) {
-                        memcpy(fts_query + out, " OR ", 4);
-                        out += 4;
-                    }
-                    in_word = true;
-                    had_word = true;
-                }
-                fts_query[out++] = c;
+        char *saveptr = NULL;
+        char *tok = strtok_r(qcopy, " \t", &saveptr);
+        while (tok) {
+            /* Check against stop words (case-insensitive) */
+            bool is_stop = false;
+            for (const char **sw = stop_words; *sw; sw++) {
+                if (strcasecmp(tok, *sw) == 0) { is_stop = true; break; }
             }
+            if (!is_stop && strlen(tok) >= 2) {
+                if (had_word) {
+                    memcpy(fts_query + out, " OR ", 4);
+                    out += 4;
+                }
+                size_t tlen = strlen(tok);
+                memcpy(fts_query + out, tok, tlen);
+                out += tlen;
+                fts_query[out++] = '*'; /* prefix match */
+                had_word = true;
+            }
+            tok = strtok_r(NULL, " \t", &saveptr);
         }
-        if (in_word) {
-            fts_query[out++] = '*'; /* prefix match for last word */
+        free(qcopy);
+
+        if (!had_word) {
+            /* All words were stop words — use original query */
+            size_t oq = strlen(query);
+            memcpy(fts_query, query, oq);
+            fts_query[oq] = '\0';
+        } else {
+            fts_query[out] = '\0';
         }
-        fts_query[out] = '\0';
         bind_text(stmt, 1, fts_query);
         free(fts_query);
     }
