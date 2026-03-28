@@ -366,29 +366,31 @@ int cbm_store_delete_file_hashes(cbm_store_t *s, const char *project);
 
 int cbm_store_compute_pagerank(cbm_store_t *s, const char *project, int iterations, double damping);
 
-typedef struct {
-    const char *name;
-    const char *qualified_name;
-    const char *label;
-    const char *file_path;
-    int in_degree;
-    int out_degree;
-    double pagerank;
-} cbm_key_symbol_t;
+/* Betweenness centrality (Brandes' algorithm). Computed at index time,
+ * stored in node_scores.betweenness. Approximate (K=200 samples) for large repos.
+ * Must be called AFTER compute_pagerank (needs existing node_scores rows). */
+int cbm_store_compute_betweenness(cbm_store_t *s, const char *project);
 
-int cbm_store_get_key_symbols(cbm_store_t *s, const char *project, const char *focus, int limit,
-                              cbm_key_symbol_t **out, int *count);
+/* Personalized PageRank: query-time computation with weighted edges and seed bias.
+ * Returns scores in memory (not stored to DB). Caller must free out_node_ids and out_scores.
+ * Uses ALL edge types with weights (CALLS=1.0, INHERITS=0.9, HTTP_CALLS=0.8, etc.).
+ * Teleport vector: seed nodes get 100/seed_count, others get 1/node_count. */
+int cbm_store_compute_personalized_pagerank(cbm_store_t *s, const char *project,
+                                            const int64_t *seed_ids, int seed_count, int iterations,
+                                            double damping, int64_t **out_node_ids,
+                                            double **out_scores, int *out_count);
 
-void cbm_store_key_symbols_free(cbm_key_symbol_t *symbols, int count);
+/* ── FTS5 Search ───────────────────────────────────────────────── */
 
-/* ── Search ─────────────────────────────────────────────────────── */
+/* Rebuild FTS5 index from nodes table content. Call after bulk node imports. */
+int cbm_store_rebuild_fts(cbm_store_t *s, const char *project);
 
-int cbm_store_search(cbm_store_t *s, const cbm_search_params_t *params, cbm_search_output_t *out);
+/* BM25 keyword search via FTS5. Returns matched node IDs and BM25 scores.
+ * Caller must free out_node_ids and out_bm25_scores. */
+int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query, int limit,
+                         int64_t **out_node_ids, double **out_bm25_scores, int *out_count);
 
-/* Free a search output's allocated memory. */
-void cbm_store_search_free(cbm_search_output_t *out);
-
-/* ── Ranked Search ─────────────────────────────────────────────── */
+/* ── Composite Ranked Search ───────────────────────────────────── */
 
 typedef struct {
     int64_t node_id;
@@ -410,6 +412,30 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
                             int max_results, cbm_ranked_result_t **out, int *out_count);
 
 void cbm_store_ranked_results_free(cbm_ranked_result_t *results, int count);
+
+/* ── Key Symbols ───────────────────────────────────────────────── */
+
+typedef struct {
+    const char *name;
+    const char *qualified_name;
+    const char *label;
+    const char *file_path;
+    int in_degree;
+    int out_degree;
+    double pagerank;
+} cbm_key_symbol_t;
+
+int cbm_store_get_key_symbols(cbm_store_t *s, const char *project, const char *focus, int limit,
+                              cbm_key_symbol_t **out, int *count);
+
+void cbm_store_key_symbols_free(cbm_key_symbol_t *symbols, int count);
+
+/* ── Search ─────────────────────────────────────────────────────── */
+
+int cbm_store_search(cbm_store_t *s, const cbm_search_params_t *params, cbm_search_output_t *out);
+
+/* Free a search output's allocated memory. */
+void cbm_store_search_free(cbm_search_output_t *out);
 
 /* ── Traversal ──────────────────────────────────────────────────── */
 

@@ -132,27 +132,12 @@ TEST(mcp_initialize_response) {
 TEST(mcp_tools_list) {
     char *json = cbm_mcp_tools_list();
     ASSERT_NOT_NULL(json);
-    /* Should contain all public tools */
-    ASSERT_NOT_NULL(strstr(json, "index_repository"));
-    ASSERT_NOT_NULL(strstr(json, "search_graph"));
-    ASSERT_NOT_NULL(strstr(json, "query_graph"));
-    ASSERT_NOT_NULL(strstr(json, "trace_call_path"));
-    ASSERT_NOT_NULL(strstr(json, "get_code_snippet"));
-    ASSERT_NOT_NULL(strstr(json, "get_graph_schema"));
-    ASSERT_NOT_NULL(strstr(json, "get_architecture"));
-    ASSERT_NOT_NULL(strstr(json, "get_key_symbols"));
-    ASSERT_NOT_NULL(strstr(json, "get_impact_analysis"));
-    ASSERT_NOT_NULL(strstr(json, "get_architecture_summary"));
-    ASSERT_NOT_NULL(strstr(json, "explore"));
-    ASSERT_NOT_NULL(strstr(json, "understand"));
-    ASSERT_NOT_NULL(strstr(json, "prepare_change"));
-    ASSERT_NOT_NULL(strstr(json, "search_code"));
-    ASSERT_NOT_NULL(strstr(json, "list_projects"));
-    ASSERT_NOT_NULL(strstr(json, "delete_project"));
-    ASSERT_NOT_NULL(strstr(json, "index_status"));
-    ASSERT_NOT_NULL(strstr(json, "detect_changes"));
-    ASSERT_NOT_NULL(strstr(json, "manage_adr"));
-    ASSERT_NOT_NULL(strstr(json, "ingest_traces"));
+    /* v2: 5 consolidated tools */
+    ASSERT_NOT_NULL(strstr(json, "\"context\""));
+    ASSERT_NOT_NULL(strstr(json, "\"impact\""));
+    ASSERT_NOT_NULL(strstr(json, "\"read_symbol\""));
+    ASSERT_NOT_NULL(strstr(json, "\"query\""));
+    ASSERT_NOT_NULL(strstr(json, "\"index\""));
     free(json);
     PASS();
 }
@@ -309,11 +294,11 @@ TEST(server_handle_tools_list) {
         cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
     ASSERT_NOT_NULL(resp);
     ASSERT_NOT_NULL(strstr(resp, "\"id\":2"));
-    ASSERT_NOT_NULL(strstr(resp, "search_graph"));
-    ASSERT_NOT_NULL(strstr(resp, "query_graph"));
-    ASSERT_NOT_NULL(strstr(resp, "explore"));
-    ASSERT_NOT_NULL(strstr(resp, "understand"));
-    ASSERT_NOT_NULL(strstr(resp, "prepare_change"));
+    ASSERT_NOT_NULL(strstr(resp, "context"));
+    ASSERT_NOT_NULL(strstr(resp, "impact"));
+    ASSERT_NOT_NULL(strstr(resp, "read_symbol"));
+    ASSERT_NOT_NULL(strstr(resp, "\"query\""));
+    ASSERT_NOT_NULL(strstr(resp, "index"));
     free(resp);
 
     cbm_mcp_server_free(srv);
@@ -2863,7 +2848,7 @@ TEST(session_accumulates_across_tools) {
 TEST(get_session_context_tools_list_includes_tool) {
     char *tools_json = cbm_mcp_tools_list();
     ASSERT_NOT_NULL(tools_json);
-    ASSERT_NOT_NULL(strstr(tools_json, "get_session_context"));
+    ASSERT_NOT_NULL(strstr(tools_json, "context"));
     free(tools_json);
     PASS();
 }
@@ -3054,7 +3039,7 @@ TEST(session_summary_with_impact) {
 TEST(session_summary_tools_list) {
     char *tools_json = cbm_mcp_tools_list();
     ASSERT_NOT_NULL(tools_json);
-    ASSERT_NOT_NULL(strstr(tools_json, "get_session_summary"));
+    ASSERT_NOT_NULL(strstr(tools_json, "context"));
     free(tools_json);
     PASS();
 }

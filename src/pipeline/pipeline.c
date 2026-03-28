@@ -817,14 +817,25 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
                 }
             }
             if (cbm_store_compute_pagerank(hash_store, p->project_name, 20, 0.85) != CBM_STORE_OK) {
-                /* PageRank is a ranking enhancement; keep a successful index even if
-                 * score computation fails on this pass. */
                 cbm_log_warn("pipeline.warn", "phase", "pagerank", "project", p->project_name,
                              "error", cbm_store_error(hash_store));
             }
+            cbm_log_info("pass.timing", "pass", "pagerank", "project", p->project_name);
+
+            if (cbm_store_compute_betweenness(hash_store, p->project_name) != CBM_STORE_OK) {
+                cbm_log_warn("pipeline.warn", "phase", "betweenness", "project", p->project_name,
+                             "error", cbm_store_error(hash_store));
+            }
+            cbm_log_info("pass.timing", "pass", "betweenness", "project", p->project_name);
+
+            if (cbm_store_rebuild_fts(hash_store, p->project_name) != CBM_STORE_OK) {
+                cbm_log_warn("pipeline.warn", "phase", "fts_rebuild", "project", p->project_name,
+                             "error", cbm_store_error(hash_store));
+            }
+            cbm_log_info("pass.timing", "pass", "fts_rebuild", "project", p->project_name);
+
             cbm_store_close(hash_store);
             cbm_log_info("pass.timing", "pass", "persist_hashes", "files", itoa_buf(file_count));
-            cbm_log_info("pass.timing", "pass", "pagerank", "project", p->project_name);
         }
     }
 

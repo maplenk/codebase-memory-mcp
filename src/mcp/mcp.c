@@ -732,194 +732,62 @@ typedef struct {
     const char *input_schema; /* JSON string */
 } tool_def_t;
 
+/* ── v2 Consolidated Tools (5 tools with modes) ───────────────── */
+
 static const tool_def_t TOOLS[] = {
-    {"index_repository", "Index a repository into the knowledge graph",
-     "{\"type\":\"object\",\"properties\":{\"repo_path\":{\"type\":\"string\",\"description\":"
-     "\"Path to the "
-     "repository\"},\"mode\":{\"type\":\"string\",\"enum\":[\"full\",\"fast\"],\"default\":"
-     "\"full\"}},\"required\":[\"repo_path\"]}"},
-
-    {"search_graph",
-     "Search the code knowledge graph for functions, classes, routes, and variables. Use INSTEAD "
-     "OF grep/glob when finding code definitions, implementations, or relationships. Returns "
-     "precise results in one call.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"label\":{\"type\":"
-     "\"string\"},\"name_pattern\":{\"type\":\"string\"},\"qn_pattern\":{\"type\":\"string\"},"
-     "\"file_pattern\":{\"type\":\"string\"},\"relationship\":{\"type\":\"string\"},\"min_degree\":"
-     "{\"type\":\"integer\"},\"max_degree\":{\"type\":\"integer\"},\"exclude_entry_points\":{"
-     "\"type\":\"boolean\"},\"include_connected\":{\"type\":\"boolean\"},\"limit\":{\"type\":"
-     "\"integer\",\"description\":\"Max results. Default: "
-     "unlimited\"},\"offset\":{\"type\":\"integer\",\"default\":0},\"ranked\":{\"type\":"
-     "\"boolean\","
-     "\"default\":true,\"description\":\"Sort results by PageRank importance when available.\"},"
-     "\"max_tokens\":{\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output "
-     "size. Truncates lower-ranked results when needed.\"}},"
-     "\"required\":[\"project\"]}"},
-
-    {"query_graph",
-     "Execute a Cypher query against the knowledge graph for complex multi-hop patterns, "
-     "aggregations, and cross-service analysis.",
-     "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Cypher "
-     "query\"},\"project\":{\"type\":\"string\"},\"max_rows\":{\"type\":\"integer\","
-     "\"description\":"
-     "\"Optional row limit. Default: unlimited (100k "
-     "ceiling)\"},\"max_tokens\":{\"type\":\"integer\",\"default\":2000,\"description\":"
-     "\"Maximum output size. Compacts lower-priority rows when needed.\"}},"
+    {"context",
+     "Find relevant code for a task or query. Returns ranked files with function signatures. "
+     "Use INSTEAD OF grep/glob for code discovery. Modes: locate (default, BM25+PPR ranked search), "
+     "explore (area exploration), architecture (project overview), symbols (key symbols by PageRank), "
+     "session (files/symbols touched this session), summary (compact session recap).",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"query\":{\"type\":\"string\",\"description\":\"What you're looking for — task, keyword, or symbol name\"},"
+     "\"project\":{\"type\":\"string\"},"
+     "\"mode\":{\"type\":\"string\",\"enum\":[\"locate\",\"explore\",\"architecture\",\"symbols\","
+     "\"session\",\"summary\"],\"default\":\"locate\"},"
+     "\"max_tokens\":{\"type\":\"integer\",\"default\":2000}},"
      "\"required\":[\"query\",\"project\"]}"},
 
-    {"trace_call_path",
-     "Trace function call paths — who calls a function and what it calls. Use INSTEAD OF grep when "
-     "finding callers, dependencies, or impact analysis.",
-     "{\"type\":\"object\",\"properties\":{\"function_name\":{\"type\":\"string\"},\"project\":{"
-     "\"type\":\"string\"},\"direction\":{\"type\":\"string\",\"enum\":[\"inbound\",\"outbound\","
-     "\"both\"],\"default\":\"both\"},\"depth\":{\"type\":\"integer\",\"default\":3},\"edge_"
-     "types\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"ranked\":{\"type\":"
-     "\"boolean\","
-     "\"default\":true,\"description\":\"Sort callers/callees by PageRank importance.\"},"
-     "\"max_tokens\":{\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output "
-     "size. Truncates lower-ranked path results when needed.\"}},"
-     "\"required\":[\"function_name\",\"project\"]}"},
+    {"impact",
+     "Analyze blast radius of changing a symbol, trace call paths, or prepare a change review scope. "
+     "Modes: blast (default, impact analysis), trace (call path tracing), prepare (review scope + tests).",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"symbol\":{\"type\":\"string\",\"description\":\"Function, method, or class name\"},"
+     "\"project\":{\"type\":\"string\"},"
+     "\"mode\":{\"type\":\"string\",\"enum\":[\"blast\",\"trace\",\"prepare\"],\"default\":\"blast\"},"
+     "\"to\":{\"type\":\"string\",\"description\":\"Target symbol (trace mode only)\"},"
+     "\"depth\":{\"type\":\"integer\",\"default\":3},"
+     "\"include_tests\":{\"type\":\"boolean\",\"default\":true},"
+     "\"max_tokens\":{\"type\":\"integer\",\"default\":2000}},"
+     "\"required\":[\"symbol\",\"project\"]}"},
 
-    {"get_code_snippet",
-     "Read source code for a function/class/symbol. IMPORTANT: First call search_graph to find the "
-     "exact qualified_name, then pass it here. This is a read tool, not a search tool. Accepts "
-     "full qualified_name (exact match) or short function name (returns suggestions if ambiguous).",
-     "{\"type\":\"object\",\"properties\":{\"qualified_name\":{\"type\":\"string\",\"description\":"
-     "\"Full qualified_name from search_graph, or short function name\"},\"project\":{"
-     "\"type\":\"string\"},\"include_neighbors\":{"
-     "\"type\":\"boolean\",\"default\":false}},\"required\":[\"qualified_name\",\"project\"]}"},
+    {"read_symbol",
+     "Read source code for a specific function/class. Returns exact source with optional caller/callee signatures.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"symbol\":{\"type\":\"string\",\"description\":\"Qualified name or short function name\"},"
+     "\"project\":{\"type\":\"string\"},"
+     "\"with\":{\"type\":\"string\",\"enum\":[\"none\",\"callers\",\"callees\",\"both\"],\"default\":\"none\"}},"
+     "\"required\":[\"symbol\",\"project\"]}"},
 
-    {"get_graph_schema", "Get the schema of the knowledge graph (node labels, edge types)",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"}},\"required\":["
-     "\"project\"]}"},
+    {"query",
+     "Execute a Cypher query or get the graph schema. Power-user escape hatch for complex graph analysis. "
+     "Omit cypher to get the schema.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"cypher\":{\"type\":\"string\",\"description\":\"Cypher query (omit for schema)\"},"
+     "\"project\":{\"type\":\"string\"},"
+     "\"max_tokens\":{\"type\":\"integer\",\"default\":2000}},"
+     "\"required\":[\"project\"]}"},
 
-    {"get_architecture",
-     "Get high-level architecture overview — packages, services, dependencies, and project "
-     "structure at a glance.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"aspects\":{\"type\":"
-     "\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"project\"]}"},
-
-    {"get_architecture_summary",
-     "Generate a structured markdown architecture summary from the existing SQLite graph, with "
-     "optional focus filtering and output size control.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\",\"description\":"
-     "\"Indexed project name (from list_projects).\"},\"project_path\":{\"type\":\"string\","
-     "\"description\":\"Repo path — seeds session root for auto-indexing when project is unknown."
-     "\"},\"max_tokens\":{"
-     "\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output size. Controls "
-     "detail level.\"},\"focus\":{\"type\":\"string\",\"description\":\"Optional domain keyword "
-     "to zoom into (for example payment or inventory).\"}},\"anyOf\":[{\"required\":["
-     "\"project\"]},{\"required\":[\"project_path\"]}]}"},
-
-    {"get_key_symbols",
-     "Human-readable ranked symbol list: top functions/classes by PageRank importance. Use this "
-     "for fast first-session orientation and central entry-point discovery.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"limit\":{\"type\":"
-     "\"integer\",\"default\":20},\"focus\":{\"type\":\"string\",\"description\":\"Optional "
-     "keyword to narrow symbols by name, qualified name, or file path.\"}},\"required\":["
-     "\"project\"]}"},
-
-    {"get_impact_analysis",
-     "Analyze the blast radius of changing a symbol: direct callers, indirect reach, routes, "
-     "affected tests, and a low/medium/high risk score.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"symbol\":{\"type\":"
-     "\"string\",\"description\":\"Exact function, method, or class name.\"},\"depth\":{"
-     "\"type\":\"integer\",\"default\":3},\"include_tests\":{\"type\":\"boolean\",\"default\":true,"
-     "\"description\":\"Include affected test files in the output array.\"},\"max_tokens\":{"
-     "\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output size. Controls "
-     "detail level.\"}},\"required\":["
-     "\"project\",\"symbol\"]}"},
-
-    {"explore",
-     "Compound area exploration: matching symbols, small dependency summaries, hotspots, and "
-     "entry points in one response.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"area\":{\"type\":"
-     "\"string\",\"description\":\"Case-insensitive keyword for the area to explore.\"},"
-     "\"max_tokens\":{\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output "
-     "size. Truncates lower-priority sections when needed.\"}},\"required\":[\"project\","
-     "\"area\"]}"},
-
-    {"understand",
-     "Compound symbol deep-dive: definition, source, callers, callees, and connected symbols in "
-     "one response.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"symbol\":{\"type\":"
-     "\"string\",\"description\":\"Short symbol name or full qualified_name.\"},\"max_tokens\":{"
-     "\"type\":\"integer\",\"default\":2000,\"description\":\"Maximum output size. Truncates "
-     "source and lower-priority arrays when needed.\"}},\"required\":[\"project\","
-     "\"symbol\"]}"},
-
-    {"prepare_change",
-     "Compound pre-change analysis: blast radius, affected tests, risk score, and suggested "
-     "review scope.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"symbol\":{\"type\":"
-     "\"string\",\"description\":\"Exact function, method, or class name.\"},"
-     "\"include_tests\":{\"type\":\"boolean\",\"default\":true,\"description\":\"Include "
-     "affected test details in the output.\"},\"max_tokens\":{\"type\":\"integer\","
-     "\"default\":2000,\"description\":\"Maximum output size. Truncates lower-priority impact "
-     "details when needed.\"}},\"required\":[\"project\",\"symbol\"]}"},
-
-    {"search_code",
-     "Graph-augmented code search. Finds text patterns via grep, then enriches results with "
-     "the knowledge graph: deduplicates matches into containing functions, ranks by structural "
-     "importance (definitions first, popular functions next, tests last). "
-     "Modes: compact (default, signatures only — token efficient), full (with source), "
-     "files (just file paths). Use path_filter regex to scope results.",
-     "{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":\"string\"},\"project\":{\"type\":"
-     "\"string\"},\"file_pattern\":{\"type\":\"string\",\"description\":\"Glob for grep "
-     "--include (e.g. *.go)\"},\"path_filter\":{\"type\":\"string\",\"description\":\"Regex "
-     "filter on result file paths (e.g. ^src/ or \\\\.(go|ts)$)\"},\"mode\":{\"type\":\"string\","
-     "\"enum\":[\"compact\",\"full\",\"files\"],\"default\":\"compact\",\"description\":\"compact: "
-     "signatures+metadata (default). full: with source. files: just file list.\"},"
-     "\"context\":{\"type\":\"integer\",\"description\":\"Lines of context around each match "
-     "(like grep -C). Only used in compact mode.\"},"
-     "\"regex\":{\"type\":\"boolean\",\"default\":false},\"limit\":{\"type\":\"integer\","
-     "\"description\":\"Max results (default 10)\",\"default\":10}},\"required\":["
-     "\"pattern\",\"project\"]}"},
-
-    {"list_projects", "List all indexed projects", "{\"type\":\"object\",\"properties\":{}}"},
-
-    {"delete_project", "Delete a project from the index",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"}},\"required\":["
-     "\"project\"]}"},
-
-    {"index_status", "Get the indexing status of a project",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"}},\"required\":["
-     "\"project\"]}"},
-
-    {"detect_changes", "Detect code changes and their impact",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"scope\":{\"type\":"
-     "\"string\"},\"depth\":{\"type\":\"integer\",\"default\":2},\"base_branch\":{\"type\":"
-     "\"string\",\"default\":\"main\"}},\"required\":[\"project\"]}"},
-
-    {"manage_adr", "Create or update Architecture Decision Records",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\"},\"mode\":{\"type\":"
-     "\"string\",\"enum\":[\"get\",\"update\",\"sections\"]},\"content\":{\"type\":\"string\"},"
-     "\"sections\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"project\"]"
-     "}"},
-
-    {"ingest_traces", "Ingest runtime traces to enhance the knowledge graph",
-     "{\"type\":\"object\",\"properties\":{\"traces\":{\"type\":\"array\",\"items\":{\"type\":"
-     "\"object\"}},\"project\":{\"type\":"
-     "\"string\"}},\"required\":[\"traces\",\"project\"]}"},
-
-    {"get_session_context",
-     "Get session memory: files read/edited, symbols queried, areas explored, "
-     "and related symbols not yet examined, ranked by PageRank.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\","
-     "\"description\":\"Project name (needed for related_untouched computation).\"},"
-     "\"include_related\":{\"type\":\"boolean\",\"default\":true,"
-     "\"description\":\"Include graph neighbors of touched symbols that have not been "
-     "examined yet.\"},\"limit\":{\"type\":\"integer\",\"default\":10,"
-     "\"description\":\"Max related_untouched items.\"}},\"required\":[]}"},
-
-    {"get_session_summary",
-     "Compact markdown session summary for context recovery after compaction. "
-     "Shows files touched, symbols investigated with PageRank, areas explored, "
-     "and suggested next steps.",
-     "{\"type\":\"object\",\"properties\":{\"project\":{\"type\":\"string\","
-     "\"description\":\"Project name (needed for PageRank enrichment and next-step "
-     "suggestions).\"},\"max_tokens\":{\"type\":\"integer\",\"default\":2000,"
-     "\"description\":\"Maximum output size.\"}},\"required\":[]}"},
+    {"index",
+     "Index a repository, check status, list projects, or detect changes. "
+     "Actions: index (default), status, list, delete, changes.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"repo_path\":{\"type\":\"string\",\"description\":\"Path to the repository (for index action)\"},"
+     "\"project\":{\"type\":\"string\",\"description\":\"Project name (for status/delete/changes)\"},"
+     "\"action\":{\"type\":\"string\",\"enum\":[\"index\",\"status\",\"list\",\"delete\",\"changes\"],"
+     "\"default\":\"index\"},"
+     "\"mode\":{\"type\":\"string\",\"enum\":[\"full\",\"fast\"],\"default\":\"full\"}},"
+     "\"required\":[]}"},
 };
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
@@ -2250,6 +2118,9 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
 static char *handle_get_key_symbols(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
     char *focus = cbm_mcp_get_string_arg(args, "focus");
+    if (!focus) {
+        focus = cbm_mcp_get_string_arg(args, "query"); /* v2 compat */
+    }
     int limit = cbm_mcp_get_int_arg(args, "limit", 20);
     char *auto_err = NULL;
     cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
@@ -2515,6 +2386,9 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
     char *project = cbm_mcp_get_string_arg(args, "project");
     char *project_path = cbm_mcp_get_string_arg(args, "project_path");
     char *focus = cbm_mcp_get_string_arg(args, "focus");
+    if (!focus) {
+        focus = cbm_mcp_get_string_arg(args, "query"); /* v2 compat */
+    }
     int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", 2000);
     char *display_path = NULL;
 
@@ -2737,6 +2611,9 @@ static char *handle_get_architecture_summary(cbm_mcp_server_t *srv, const char *
 
 static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     char *func_name = cbm_mcp_get_string_arg(args, "function_name");
+    if (!func_name) {
+        func_name = cbm_mcp_get_string_arg(args, "symbol"); /* v2 compat */
+    }
     char *project = cbm_mcp_get_string_arg(args, "project");
     char *direction = cbm_mcp_get_string_arg(args, "direction");
     int depth = cbm_mcp_get_int_arg(args, "depth", 3);
@@ -3379,6 +3256,9 @@ static char *build_snippet_response(cbm_mcp_server_t *srv, cbm_node_t *node,
 
 static char *handle_get_code_snippet(cbm_mcp_server_t *srv, const char *args) {
     char *qn = cbm_mcp_get_string_arg(args, "qualified_name");
+    if (!qn) {
+        qn = cbm_mcp_get_string_arg(args, "symbol"); /* v2 compat */
+    }
     char *project = cbm_mcp_get_string_arg(args, "project");
     bool include_neighbors = cbm_mcp_get_bool_arg(args, "include_neighbors");
 
@@ -4249,6 +4129,9 @@ static int search_contains(cbm_store_t *store, const char *project, const char *
 static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     char *project = cbm_mcp_get_string_arg(args, "project");
     char *area = cbm_mcp_get_string_arg(args, "area");
+    if (!area) {
+        area = cbm_mcp_get_string_arg(args, "query"); /* v2 compat */
+    }
     int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", DEFAULT_MAX_TOKENS);
     size_t char_budget = max_tokens_to_char_budget(max_tokens);
 
@@ -6708,11 +6591,223 @@ static char *handle_get_session_context(cbm_mcp_server_t *srv, const char *args)
 /* ── Tool dispatch ────────────────────────────────────────────── */
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+/* ── v2 Context locate handler (BM25 + PPR ranked search) ──────── */
+
+static char *handle_context_locate(cbm_mcp_server_t *srv, const char *args) {
+    char *project = cbm_mcp_get_string_arg(args, "project");
+    char *query = cbm_mcp_get_string_arg(args, "query");
+    int max_tokens = cbm_mcp_get_int_arg(args, "max_tokens", DEFAULT_MAX_TOKENS);
+    size_t char_budget = max_tokens_to_char_budget(max_tokens);
+
+    if (!query || !query[0]) {
+        free(project);
+        free(query);
+        return cbm_mcp_text_result("query is required for locate mode", true);
+    }
+
+    char *auto_err = NULL;
+    cbm_store_t *store = try_auto_index(srv, &project, &auto_err);
+    if (!store) {
+        free(project);
+        free(query);
+        return auto_err;
+    }
+
+    cbm_ranked_result_t *results = NULL;
+    int count = 0;
+    int rc = cbm_store_ranked_search(store, project, query, 20, &results, &count);
+
+    /* Build JSON response */
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_obj_add_str(doc, root, "query", query);
+    yyjson_mut_obj_add_str(doc, root, "mode", "locate");
+    yyjson_mut_obj_add_int(doc, root, "result_count", count);
+
+    if (rc != CBM_STORE_OK || count == 0) {
+        yyjson_mut_obj_add_str(doc, root, "note",
+                               count == 0 ? "No FTS matches. Try different keywords."
+                                          : "ranked search failed");
+    }
+
+    yyjson_mut_val *arr = yyjson_mut_arr(doc);
+    size_t used = 200; /* overhead */
+    for (int i = 0; i < count && used < char_budget; i++) {
+        yyjson_mut_val *item = yyjson_mut_obj(doc);
+        if (results[i].name) {
+            yyjson_mut_obj_add_str(doc, item, "name", results[i].name);
+        }
+        if (results[i].file_path) {
+            yyjson_mut_obj_add_str(doc, item, "file", results[i].file_path);
+        }
+        if (results[i].label) {
+            yyjson_mut_obj_add_str(doc, item, "type", results[i].label);
+        }
+        yyjson_mut_obj_add_real(doc, item, "score", results[i].composite_score);
+        yyjson_mut_obj_add_real(doc, item, "ppr", results[i].ppr_score);
+        yyjson_mut_obj_add_real(doc, item, "bm25", results[i].bm25_score);
+        yyjson_mut_obj_add_real(doc, item, "betweenness", results[i].betweenness);
+        if (results[i].start_line > 0) {
+            yyjson_mut_obj_add_int(doc, item, "line", results[i].start_line);
+        }
+        yyjson_mut_arr_append(arr, item);
+        used += 120; /* approx per result */
+
+        /* Track symbol in session */
+        if (srv->session && results[i].name) {
+            cbm_session_track_symbol(srv->session, results[i].name);
+        }
+    }
+    yyjson_mut_obj_add_val(doc, root, "results", arr);
+
+    /* Track in session */
+    if (srv->session) {
+        cbm_session_track_area(srv->session, query);
+        cbm_session_bump_query_count(srv->session);
+    }
+
+    /* Serialize JSON BEFORE freeing results — yyjson stores string references, not copies */
+    char *json = yyjson_mut_write(doc, YYJSON_WRITE_ALLOW_INVALID_UNICODE, NULL);
+    yyjson_mut_doc_free(doc);
+    cbm_store_ranked_results_free(results, count);
+
+    char *result = cbm_mcp_text_result(json, false);
+    free(json);
+    free(project);
+    free(query);
+    return result;
+}
+
+/* ── v2 Dispatch handlers ──────────────────────────────────────── */
+
+static char *handle_context(cbm_mcp_server_t *srv, const char *args) {
+    char *mode = cbm_mcp_get_string_arg(args, "mode");
+    char *result;
+
+    if (!mode || strcmp(mode, "locate") == 0) {
+        result = handle_context_locate(srv, args);
+    } else if (strcmp(mode, "explore") == 0) {
+        /* Map query→area for explore handler */
+        result = handle_explore(srv, args);
+    } else if (strcmp(mode, "architecture") == 0) {
+        result = handle_get_architecture_summary(srv, args);
+    } else if (strcmp(mode, "symbols") == 0) {
+        result = handle_get_key_symbols(srv, args);
+    } else if (strcmp(mode, "session") == 0) {
+        result = handle_get_session_context(srv, args);
+    } else if (strcmp(mode, "summary") == 0) {
+        result = handle_get_session_summary(srv, args);
+    } else {
+        result = cbm_mcp_text_result("unknown context mode", true);
+    }
+
+    free(mode);
+    return result;
+}
+
+static char *handle_impact_v2(cbm_mcp_server_t *srv, const char *args) {
+    char *mode = cbm_mcp_get_string_arg(args, "mode");
+    char *result;
+
+    if (!mode || strcmp(mode, "blast") == 0) {
+        result = handle_get_impact_analysis(srv, args);
+    } else if (strcmp(mode, "trace") == 0) {
+        /* Map symbol→function_name for trace handler */
+        result = handle_trace_call_path(srv, args);
+    } else if (strcmp(mode, "prepare") == 0) {
+        result = handle_prepare_change(srv, args);
+    } else {
+        result = cbm_mcp_text_result("unknown impact mode", true);
+    }
+
+    free(mode);
+    return result;
+}
+
+static char *handle_read_symbol(cbm_mcp_server_t *srv, const char *args) {
+    char *with_mode = cbm_mcp_get_string_arg(args, "with");
+    char *symbol = cbm_mcp_get_string_arg(args, "symbol");
+
+    if (!symbol || !symbol[0]) {
+        free(symbol);
+        free(with_mode);
+        return cbm_mcp_text_result("symbol is required", true);
+    }
+
+    /* Build args for get_code_snippet with qualified_name = symbol */
+    /* For "both"/"callers"/"callees", use understand handler instead */
+    char *result;
+    if (with_mode && strcmp(with_mode, "none") != 0) {
+        result = handle_understand(srv, args);
+    } else {
+        result = handle_get_code_snippet(srv, args);
+    }
+
+    free(symbol);
+    free(with_mode);
+    return result;
+}
+
+static char *handle_query_v2(cbm_mcp_server_t *srv, const char *args) {
+    char *cypher = cbm_mcp_get_string_arg(args, "cypher");
+
+    if (!cypher || !cypher[0]) {
+        /* No cypher = return schema */
+        free(cypher);
+        return handle_get_graph_schema(srv, args);
+    }
+
+    free(cypher);
+    return handle_query_graph(srv, args);
+}
+
+static char *handle_index_v2(cbm_mcp_server_t *srv, const char *args) {
+    char *action = cbm_mcp_get_string_arg(args, "action");
+    char *result;
+
+    if (!action || strcmp(action, "index") == 0) {
+        result = handle_index_repository(srv, args);
+    } else if (strcmp(action, "status") == 0) {
+        result = handle_index_status(srv, args);
+    } else if (strcmp(action, "list") == 0) {
+        result = handle_list_projects(srv, args);
+    } else if (strcmp(action, "delete") == 0) {
+        result = handle_delete_project(srv, args);
+    } else if (strcmp(action, "changes") == 0) {
+        result = handle_detect_changes(srv, args);
+    } else {
+        result = cbm_mcp_text_result("unknown index action", true);
+    }
+
+    free(action);
+    return result;
+}
+
 char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const char *args_json) {
     if (!tool_name) {
         return cbm_mcp_text_result("missing tool name", true);
     }
 
+    /* ── v2 tools ──────────────────────────────────────────────── */
+    if (strcmp(tool_name, "context") == 0) {
+        return handle_context(srv, args_json);
+    }
+    if (strcmp(tool_name, "impact") == 0) {
+        return handle_impact_v2(srv, args_json);
+    }
+    if (strcmp(tool_name, "read_symbol") == 0) {
+        return handle_read_symbol(srv, args_json);
+    }
+    if (strcmp(tool_name, "query") == 0) {
+        return handle_query_v2(srv, args_json);
+    }
+    if (strcmp(tool_name, "index") == 0) {
+        return handle_index_v2(srv, args_json);
+    }
+
+    /* ── v1 backward-compatible aliases ────────────────────────── */
     if (strcmp(tool_name, "list_projects") == 0) {
         return handle_list_projects(srv, args_json);
     }
@@ -6755,8 +6850,6 @@ char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const ch
     if (strcmp(tool_name, "prepare_change") == 0) {
         return handle_prepare_change(srv, args_json);
     }
-
-    /* Pipeline-dependent tools */
     if (strcmp(tool_name, "index_repository") == 0) {
         return handle_index_repository(srv, args_json);
     }
@@ -6781,6 +6874,7 @@ char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const ch
     if (strcmp(tool_name, "get_session_summary") == 0) {
         return handle_get_session_summary(srv, args_json);
     }
+
     char msg[256];
     snprintf(msg, sizeof(msg), "unknown tool: %s", tool_name);
     return cbm_mcp_text_result(msg, true);

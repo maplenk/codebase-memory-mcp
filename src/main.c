@@ -122,6 +122,7 @@ static int run_cli(int argc, char **argv) {
     char *result = cbm_mcp_handle_tool(srv, tool_name, args_json);
     if (result) {
         printf("%s\n", result);
+        fflush(stdout);
         free(result);
     }
 
@@ -148,12 +149,13 @@ static void print_help(void) {
     printf("  --port=N     Set UI port (default 9749, persisted)\n");
     printf("\nSupported agents (auto-detected):\n");
     printf("  Claude Code, Codex CLI, Gemini CLI, Zed, OpenCode, Antigravity, Aider, KiloCode\n");
-    printf("\nTools: index_repository, search_graph, query_graph, trace_call_path,\n");
-    printf("  get_code_snippet, get_graph_schema, get_architecture,\n");
-    printf("  get_architecture_summary, get_key_symbols, get_impact_analysis,\n");
-    printf("  explore, understand, prepare_change, search_code,\n");
-    printf("  list_projects, delete_project, index_status, detect_changes,\n");
-    printf("  manage_adr, ingest_traces\n");
+    printf("\nTools (v2):\n");
+    printf("  context    — Find relevant code (modes: locate, explore, architecture, symbols, session, summary)\n");
+    printf("  impact     — Blast radius + tracing (modes: blast, trace, prepare)\n");
+    printf("  read_symbol — Read source for a function/class (with: none, callers, callees, both)\n");
+    printf("  query      — Cypher queries or graph schema\n");
+    printf("  index      — Index/status/list/delete projects (actions: index, status, list, delete, changes)\n");
+    printf("\n  Legacy tool names (v1) are supported as aliases.\n");
 }
 
 /* ── Main ───────────────────────────────────────────────────────── */

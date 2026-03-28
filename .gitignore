@@ -51,3 +51,4 @@ src/ui/embedded_assets.c
 BENCHMARK_REPORT.md
 TEST_PLAN.md
 CHANGELOG.md
+autoresearch-results.tsv
