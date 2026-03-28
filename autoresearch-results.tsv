@@ -1,0 +1,15 @@
+# metric_direction: higher_is_better
+iteration	commit	metric	delta	guard	status	description
+0	103f140	30	0.0	pass	baseline	initial state — ranking score 30
+1	-	29	-1.0	-	discard	increase BM25 file_path weight 1.0→5.0 — score dropped
+2	-	30	0.0	-	discard	W_PPR 0.35→0.55, W_BM25 0.30→0.15 — no change
+3	-	20	-10.0	-	discard	PPR seed count 10→30 — diluted signal, score dropped
+4	-	30	0.0	-	discard	IMPORTS edge weight 0.7→1.0 — no change
+5	-	29	-1.0	-	discard	add Module to FTS5 label filter — score dropped
+6	-	21	-9.0	2683	discard	LIKE fallback for 0 FTS results — too noisy, score dropped
+7	-	21	-9.0	-	discard	file_path-only LIKE fallback — still too noisy, score 21
+8	2871c9e	46	16.0	2683	keep	exclude _ide_helper.php + FTS5 prefix queries (word*) — big improvement
+9	9a74c3b	59	13.0	2683	keep	stop word filtering in FTS5 queries — big improvement
+10	e001016	60	1.0	2683	keep	per-file cap of 5 via FNV-1a hash — general anti-flood, beats hardcoded exclusion
+11	-	-1	-61.0	-	discard	BM25 file_path 1→8 + cap 5→3 combined — catastrophic
+12	4d0a0b0	72	12.0	2683	keep	restore v2 context tool + explore FTS fallback — C1 now scoring
