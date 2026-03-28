@@ -6615,7 +6615,7 @@ static char *handle_context_locate(cbm_mcp_server_t *srv, const char *args) {
 
     cbm_ranked_result_t *results = NULL;
     int count = 0;
-    int rc = cbm_store_ranked_search(store, project, query, 20, &results, &count);
+    int rc = cbm_store_ranked_search(store, project, query, 10, &results, &count);
 
     /* Build JSON response */
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
