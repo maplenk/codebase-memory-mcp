@@ -2798,7 +2798,7 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
         "FROM node_fts f "
         "JOIN nodes n ON n.id = f.rowid "
         "WHERE node_fts MATCH ?1 AND n.project = ?2 "
-        "  AND n.label IN ('Function','Method','Class','Module') "
+        "  AND n.label IN ('Function','Method','Class') "
         "ORDER BY score DESC "
         "LIMIT ?3;",
         -1, &stmt, NULL);
