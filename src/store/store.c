@@ -2909,8 +2909,51 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
     /* Step 1: FTS5 BM25 search — get candidate set (top 100) */
     rc = cbm_store_fts_search(s, project, query, 100, &fts_ids, &fts_scores, &fts_count);
     if (rc != CBM_STORE_OK || fts_count == 0) {
-        /* No FTS matches — fall back to name substring search */
-        goto cleanup;
+        /* FTS5 returned nothing — fallback: LIKE on file_path only.
+         * This catches queries like "billing" → BillingWeb.php,
+         * "inventory" → InventoryController.php. */
+        sqlite3_stmt *fb = NULL;
+        char fb_sql[4096];
+        int fb_off = snprintf(fb_sql, sizeof(fb_sql),
+            "SELECT n.id, 1.0 AS score FROM nodes n WHERE n.project = ?1"
+            " AND n.label IN ('Function','Method','Class') AND (");
+        char qcopy[512];
+        strncpy(qcopy, query, sizeof(qcopy) - 1);
+        qcopy[sizeof(qcopy) - 1] = '\0';
+        int wc = 0;
+        char *tok = strtok(qcopy, " \t");
+        while (tok && wc < 20) {
+            if (strlen(tok) >= 3) {
+                if (wc > 0) fb_off += snprintf(fb_sql + fb_off, sizeof(fb_sql) - (size_t)fb_off, " OR ");
+                fb_off += snprintf(fb_sql + fb_off, sizeof(fb_sql) - (size_t)fb_off,
+                    "n.file_path LIKE '%%%s%%'", tok);
+                wc++;
+            }
+            tok = strtok(NULL, " \t");
+        }
+        if (wc == 0) goto cleanup;
+        fb_off += snprintf(fb_sql + fb_off, sizeof(fb_sql) - (size_t)fb_off, ") ORDER BY n.name LIMIT 100;");
+
+        rc = sqlite3_prepare_v2(s->db, fb_sql, -1, &fb, NULL);
+        if (rc == SQLITE_OK) {
+            bind_text(fb, 1, project);
+            int fb_cap = 32;
+            fts_ids = malloc((size_t)fb_cap * sizeof(int64_t));
+            fts_scores = malloc((size_t)fb_cap * sizeof(double));
+            fts_count = 0;
+            while (sqlite3_step(fb) == SQLITE_ROW && fts_count < 100) {
+                if (fts_count >= fb_cap) {
+                    fb_cap *= 2;
+                    fts_ids = safe_realloc(fts_ids, (size_t)fb_cap * sizeof(int64_t));
+                    fts_scores = safe_realloc(fts_scores, (size_t)fb_cap * sizeof(double));
+                }
+                fts_ids[fts_count] = sqlite3_column_int64(fb, 0);
+                fts_scores[fts_count] = sqlite3_column_double(fb, 1);
+                fts_count++;
+            }
+            sqlite3_finalize(fb);
+        }
+        if (fts_count == 0) goto cleanup;
     }
 
     /* Normalize BM25 scores to [0,1] */
