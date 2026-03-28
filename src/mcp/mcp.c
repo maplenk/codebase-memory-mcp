@@ -4291,6 +4291,8 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     cbm_entry_point_t **entry_refs = NULL;
     int entry_count = 0;
     int entry_cap = 0;
+    cbm_ranked_result_t *ranked = NULL;
+    int ranked_count = 0;
     char *result = NULL;
 
     if (!contains_regex || !file_glob) {
@@ -4309,6 +4311,11 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     append_matching_refs(&file_out, area, false, &matches, &match_count, &match_cap);
     if (match_count > 0) {
         qsort(matches, (size_t)match_count, sizeof(*matches), search_result_ref_rank_cmp);
+    }
+
+    /* Fallback: if regex search found nothing, try FTS5-based ranked search */
+    if (match_count == 0) {
+        cbm_store_ranked_search(store, project, area, 20, &ranked, &ranked_count);
     }
 
     if (collect_explore_dependencies(store, matches, match_count, &deps, &dep_count) !=
@@ -4345,8 +4352,20 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     yyjson_mut_obj_add_str(doc, root, "area", area);
 
     yyjson_mut_val *match_arr = yyjson_mut_arr(doc);
-    for (int i = 0; i < match_count; i++) {
-        add_search_result_item(doc, match_arr, matches[i], false);
+    if (ranked_count > 0 && match_count == 0) {
+        for (int i = 0; i < ranked_count; i++) {
+            yyjson_mut_val *item = yyjson_mut_obj(doc);
+            if (ranked[i].name) yyjson_mut_obj_add_str(doc, item, "name", ranked[i].name);
+            if (ranked[i].file_path) yyjson_mut_obj_add_str(doc, item, "file", ranked[i].file_path);
+            if (ranked[i].label) yyjson_mut_obj_add_str(doc, item, "type", ranked[i].label);
+            yyjson_mut_obj_add_real(doc, item, "score", ranked[i].composite_score);
+            if (ranked[i].start_line > 0) yyjson_mut_obj_add_int(doc, item, "line", ranked[i].start_line);
+            yyjson_mut_arr_append(match_arr, item);
+        }
+    } else {
+        for (int i = 0; i < match_count; i++) {
+            add_search_result_item(doc, match_arr, matches[i], false);
+        }
     }
     yyjson_mut_obj_add_val(doc, root, "matches", match_arr);
 
@@ -4394,8 +4413,9 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
         yyjson_mut_doc_set_root(doc, root);
         yyjson_mut_obj_add_str(doc, root, "area", area);
         yyjson_mut_obj_add_bool(doc, root, "truncated", true);
+        int effective_match_count = match_count > 0 ? match_count : ranked_count;
         yyjson_mut_obj_add_int(doc, root, "total_results",
-                               match_count + dep_count + filtered_hotspot_count + entry_count);
+                               effective_match_count + dep_count + filtered_hotspot_count + entry_count);
 
         size_t used = 64 + strlen(area);
         int shown = 0;
@@ -4403,22 +4423,44 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
         bool stop = false;
 
         match_arr = yyjson_mut_arr(doc);
-        for (int i = 0; i < match_count; i++) {
-            bool compact = full_items >= MAX_FULL_BUDGET_ITEMS;
-            size_t estimate = estimate_search_result_chars(matches[i], compact);
-            if (used + estimate > char_budget && !compact) {
-                compact = true;
-                estimate = estimate_search_result_chars(matches[i], true);
+        if (ranked_count > 0 && match_count == 0) {
+            for (int i = 0; i < ranked_count; i++) {
+                size_t estimate = 96;
+                if (ranked[i].name) estimate += strlen(ranked[i].name);
+                if (ranked[i].file_path) estimate += strlen(ranked[i].file_path);
+                if (ranked[i].label) estimate += strlen(ranked[i].label);
+                if (used + estimate > char_budget && shown > 0) {
+                    stop = true;
+                    break;
+                }
+                yyjson_mut_val *item = yyjson_mut_obj(doc);
+                if (ranked[i].name) yyjson_mut_obj_add_str(doc, item, "name", ranked[i].name);
+                if (ranked[i].file_path) yyjson_mut_obj_add_str(doc, item, "file", ranked[i].file_path);
+                if (ranked[i].label) yyjson_mut_obj_add_str(doc, item, "type", ranked[i].label);
+                yyjson_mut_obj_add_real(doc, item, "score", ranked[i].composite_score);
+                if (ranked[i].start_line > 0) yyjson_mut_obj_add_int(doc, item, "line", ranked[i].start_line);
+                yyjson_mut_arr_append(match_arr, item);
+                used += estimate;
+                shown++;
             }
-            if (used + estimate > char_budget && shown > 0) {
-                stop = true;
-                break;
-            }
-            add_search_result_item(doc, match_arr, matches[i], compact);
-            used += estimate;
-            shown++;
-            if (!compact) {
-                full_items++;
+        } else {
+            for (int i = 0; i < match_count; i++) {
+                bool compact = full_items >= MAX_FULL_BUDGET_ITEMS;
+                size_t estimate = estimate_search_result_chars(matches[i], compact);
+                if (used + estimate > char_budget && !compact) {
+                    compact = true;
+                    estimate = estimate_search_result_chars(matches[i], true);
+                }
+                if (used + estimate > char_budget && shown > 0) {
+                    stop = true;
+                    break;
+                }
+                add_search_result_item(doc, match_arr, matches[i], compact);
+                used += estimate;
+                shown++;
+                if (!compact) {
+                    full_items++;
+                }
             }
         }
         yyjson_mut_obj_add_val(doc, root, "matches", match_arr);
@@ -4483,6 +4525,7 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     free(json);
 
 cleanup_explore:
+    cbm_store_ranked_results_free(ranked, ranked_count);
     free(explore_hint);
     free(contains_regex);
     free(file_glob);

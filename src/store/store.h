@@ -388,6 +388,29 @@ int cbm_store_search(cbm_store_t *s, const cbm_search_params_t *params, cbm_sear
 /* Free a search output's allocated memory. */
 void cbm_store_search_free(cbm_search_output_t *out);
 
+/* ── Ranked Search ─────────────────────────────────────────────── */
+
+typedef struct {
+    int64_t node_id;
+    double composite_score;
+    double ppr_score;
+    double bm25_score;
+    double betweenness;
+    const char *name;
+    const char *qualified_name;
+    const char *label;
+    const char *file_path;
+    int start_line;
+    int end_line;
+} cbm_ranked_result_t;
+
+/* Composite search: FTS5 BM25 → PPR → merge with betweenness → ranked results.
+ * Caller must free results with cbm_store_ranked_results_free(). */
+int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *query,
+                            int max_results, cbm_ranked_result_t **out, int *out_count);
+
+void cbm_store_ranked_results_free(cbm_ranked_result_t *results, int count);
+
 /* ── Traversal ──────────────────────────────────────────────────── */
 
 int cbm_store_bfs(cbm_store_t *s, int64_t start_id, const char *direction, const char **edge_types,
