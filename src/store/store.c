@@ -2794,20 +2794,13 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
      * we negate to get positive scores. */
     int rc = sqlite3_prepare_v2(
         s->db,
-        /* Per-file cap: at most 5 results from any single file.
-         * Prevents auto-generated files (e.g. IDE helpers) from
-         * flooding results with generic method stubs. */
-        "SELECT id, score FROM ("
-        "  SELECT n.id, -bm25(node_fts, 10.0, 5.0, 1.0) AS score,"
-        "    ROW_NUMBER() OVER (PARTITION BY n.file_path "
-        "      ORDER BY -bm25(node_fts, 10.0, 5.0, 1.0) DESC) AS rn "
-        "  FROM node_fts f "
-        "  JOIN nodes n ON n.id = f.rowid "
-        "  WHERE node_fts MATCH ?1 AND n.project = ?2 "
-        "    AND n.label IN ('Function','Method','Class')"
-        ") WHERE rn <= 5 "
+        "SELECT n.id, -bm25(node_fts, 10.0, 5.0, 1.0) AS score, n.file_path "
+        "FROM node_fts f "
+        "JOIN nodes n ON n.id = f.rowid "
+        "WHERE node_fts MATCH ?1 AND n.project = ?2 "
+        "  AND n.label IN ('Function','Method','Class') "
         "ORDER BY score DESC "
-        "LIMIT ?3;",
+        "LIMIT 500;", /* fetch extra, then cap per-file in C */
         -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         store_set_error_sqlite(s, "fts_search");
@@ -2879,9 +2872,39 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
         free(fts_query);
     }
     bind_text(stmt, 2, project);
-    sqlite3_bind_int(stmt, 3, limit);
+    sqlite3_bind_int(stmt, 3, 500); /* fetch extra candidates for per-file capping */
+
+    /* Per-file cap: prevent any single file from contributing > 5 results.
+     * Track (file_path_hash, count) pairs with linear scan. */
+    #define PER_FILE_CAP 5
+    #define FILE_TRACK_CAP 128
+    struct { uint64_t hash; int count; } file_counts[FILE_TRACK_CAP];
+    int num_files = 0;
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
+        /* Check per-file cap using file_path from column 2 */
+        const char *fpath = (const char *)sqlite3_column_text(stmt, 2);
+        if (fpath) {
+            uint64_t h = 14695981039346656037ULL; /* FNV-1a */
+            for (const char *p = fpath; *p; p++) {
+                h ^= (uint64_t)(unsigned char)*p;
+                h *= 1099511628211ULL;
+            }
+            int fi = -1;
+            for (int j = 0; j < num_files; j++) {
+                if (file_counts[j].hash == h) { fi = j; break; }
+            }
+            if (fi < 0 && num_files < FILE_TRACK_CAP) {
+                fi = num_files++;
+                file_counts[fi].hash = h;
+                file_counts[fi].count = 0;
+            }
+            if (fi >= 0) {
+                if (file_counts[fi].count >= PER_FILE_CAP) continue; /* skip */
+                file_counts[fi].count++;
+            }
+        }
+        if (n >= limit) break; /* we have enough */
         if (n >= cap) {
             cap = cap > 0 ? cap * 2 : 32;
             ids = safe_realloc(ids, (size_t)cap * sizeof(int64_t));
