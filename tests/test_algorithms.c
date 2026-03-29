@@ -98,6 +98,7 @@ TEST(pagerank_basic) {
     ASSERT_EQ(rc, CBM_STORE_OK);
     ASSERT_GT(d.id, 0);
 
+    cbm_node_free_fields(&d);
     cbm_store_close(s);
     PASS();
 }
@@ -195,6 +196,7 @@ TEST(ppr_basic) {
 
     free(out_ids);
     free(out_scores);
+    cbm_node_free_fields(&a);
     cbm_store_close(s);
     PASS();
 }
@@ -229,6 +231,8 @@ TEST(ppr_multiple_seeds) {
 
     free(out_ids);
     free(out_scores);
+    cbm_node_free_fields(&a);
+    cbm_node_free_fields(&b);
     cbm_store_close(s);
     PASS();
 }
@@ -290,6 +294,7 @@ TEST(fts_search_by_name) {
     ASSERT_EQ(rc, CBM_STORE_OK);
     ASSERT(strstr(found.name, "processOrder") != NULL || strstr(found.qualified_name, "processOrder") != NULL);
 
+    cbm_node_free_fields(&found);
     free(ids);
     free(scores);
     cbm_store_close(s);
@@ -315,6 +320,7 @@ TEST(fts_search_by_path) {
     cbm_store_find_node_by_id(s, ids[0], &found);
     ASSERT(strstr(found.file_path, "payment") != NULL || strstr(found.name, "Payment") != NULL);
 
+    cbm_node_free_fields(&found);
     free(ids);
     free(scores);
     cbm_store_close(s);
