@@ -7,44 +7,44 @@
     "url": "https://github.com/maplenk/codebase-memory-mcp",
     "source": "github"
   },
-  "version": "0.7.0",
+  "version": "0.8.0",
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.7.0/codebase-memory-mcp-darwin-arm64.tar.gz",
-      "fileSha256": "bc9145d599dc5c72fdb21b8ad051f4f918c982c11b90a4f4cc1f70c9b2b1d0b5",
+      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.8.0/codebase-memory-mcp-darwin-arm64.tar.gz",
+      "fileSha256": "aeb98684b7cca3552ab185d0ff5807a9ec8c0ac697a6e774a6243b92c938a994",
       "transport": {
         "type": "stdio"
       }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.7.0/codebase-memory-mcp-darwin-amd64.tar.gz",
-      "fileSha256": "790b5e80b67d498f596bb3709d762e897071a36368ff6f19d6103a4a8c10abd9",
+      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.8.0/codebase-memory-mcp-darwin-amd64.tar.gz",
+      "fileSha256": "a08967ff1380d7e89c34df4e908c02e9a2438842b197677ce93347936939f66f",
       "transport": {
         "type": "stdio"
       }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.7.0/codebase-memory-mcp-linux-amd64.tar.gz",
-      "fileSha256": "14ba8e2a5ef85fe63ebe0217ebbb0f4ac6728ccbe4337afbc34f78f7fe1f4028",
+      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.8.0/codebase-memory-mcp-linux-amd64.tar.gz",
+      "fileSha256": "3fe376b3598a19fc84b0356431ec50a525f1454f4cf8c6457131d8797b8cb58a",
       "transport": {
         "type": "stdio"
       }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.7.0/codebase-memory-mcp-linux-arm64.tar.gz",
-      "fileSha256": "9c0042cb32ee26351fec81bd568364471386b9ef5c493efed35310bd0785964a",
+      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.8.0/codebase-memory-mcp-linux-arm64.tar.gz",
+      "fileSha256": "0b2629b4772db23b1387467efb2748964148248f6983ef68f2c75743c58bb61d",
       "transport": {
         "type": "stdio"
       }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.7.0/codebase-memory-mcp-windows-amd64.zip",
-      "fileSha256": "dee0c9842141fb9fcc22e3236390aac040d4a296eb701ae590e3f9f2fe171434",
+      "identifier": "https://github.com/maplenk/codebase-memory-mcp/releases/download/v0.8.0/codebase-memory-mcp-windows-amd64.zip",
+      "fileSha256": "8bc41f0ee360a2e5de12ba4c72093305b99b2135824df590d540ad9fdeb894d4",
       "transport": {
         "type": "stdio"
       }
