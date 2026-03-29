@@ -2995,7 +2995,7 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
 
     /* Per-file cap: prevent any single file from contributing > 5 results.
      * Track (file_path_hash, count) pairs with linear scan. */
-    #define PER_FILE_CAP 5
+    #define PER_FILE_CAP 3
     #define FILE_TRACK_CAP 128
     struct { uint64_t hash; int count; } file_counts[FILE_TRACK_CAP];
     int num_files = 0;
