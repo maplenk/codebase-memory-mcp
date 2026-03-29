@@ -277,6 +277,68 @@ static int init_schema(cbm_store_t *s) {
     return exec_sql(s, ddl);
 }
 
+/* Split CamelCase name into space-separated words.
+ * "PaymentMappingService" → "Payment Mapping Service"
+ * "OauthMiddleware" → "Oauth Middleware"
+ * Includes original name + split version for FTS5 indexing. */
+static char *camel_case_split(const char *name) {
+    if (!name || !name[0]) return strdup("");
+    size_t len = strlen(name);
+    /* Worst case: space before every char + original + space + null */
+    char *out = malloc(len * 2 + len + 2);
+    if (!out) return strdup("");
+
+    /* First: copy original name */
+    size_t o = 0;
+    memcpy(out, name, len);
+    o = len;
+    out[o++] = ' ';
+
+    /* Then: split CamelCase */
+    for (size_t i = 0; i < len; i++) {
+        if (i > 0 && name[i] >= 'A' && name[i] <= 'Z' &&
+            name[i-1] >= 'a' && name[i-1] <= 'z') {
+            out[o++] = ' '; /* lowercase→uppercase transition */
+        }
+        out[o++] = name[i];
+    }
+    out[o] = '\0';
+    return out;
+}
+
+/* Build search_terms: CamelCase-split name + file basename split.
+ * E.g., name="postOrd" file="app/Http/Controllers/OrderController.php"
+ * → "postOrd post Ord Order Controller" */
+static char *build_search_terms(const char *name, const char *file_path) {
+    char *name_split = camel_case_split(name);
+    /* Extract basename from file_path and split it too */
+    const char *basename = file_path;
+    if (file_path) {
+        const char *last_slash = strrchr(file_path, '/');
+        if (last_slash) basename = last_slash + 1;
+    }
+    /* Remove extension */
+    char base_no_ext[256];
+    if (basename) {
+        strncpy(base_no_ext, basename, sizeof(base_no_ext) - 1);
+        base_no_ext[sizeof(base_no_ext) - 1] = '\0';
+        char *dot = strrchr(base_no_ext, '.');
+        if (dot) *dot = '\0';
+    } else {
+        base_no_ext[0] = '\0';
+    }
+    char *base_split = camel_case_split(base_no_ext);
+
+    size_t total = strlen(name_split) + 1 + strlen(base_split) + 1;
+    char *result = malloc(total);
+    if (result) {
+        snprintf(result, total, "%s %s", name_split, base_split);
+    }
+    free(name_split);
+    free(base_split);
+    return result ? result : strdup("");
+}
+
 /* Migrate existing databases: add columns that may not exist yet. */
 static int migrate_schema(cbm_store_t *s) {
     /* Check if betweenness column exists in node_scores */
@@ -284,10 +346,54 @@ static int migrate_schema(cbm_store_t *s) {
     int rc = sqlite3_prepare_v2(s->db, "SELECT betweenness FROM node_scores LIMIT 0;", -1, &stmt,
                                 NULL);
     if (rc != SQLITE_OK) {
-        /* Column doesn't exist — add it */
         rc = exec_sql(s, "ALTER TABLE node_scores ADD COLUMN betweenness REAL NOT NULL DEFAULT 0;");
         if (rc != CBM_STORE_OK) {
             return rc;
+        }
+    } else {
+        sqlite3_finalize(stmt);
+    }
+
+    /* Check if search_terms column exists in nodes */
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(s->db, "SELECT search_terms FROM nodes LIMIT 0;", -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        rc = exec_sql(s, "ALTER TABLE nodes ADD COLUMN search_terms TEXT DEFAULT '';");
+        if (rc != CBM_STORE_OK) {
+            return rc;
+        }
+        /* Drop FTS table so create_fts_table rebuilds with new column */
+        exec_sql(s, "DROP TRIGGER IF EXISTS nodes_ai;"
+                     "DROP TRIGGER IF EXISTS nodes_ad;"
+                     "DROP TRIGGER IF EXISTS nodes_au;"
+                     "DROP TABLE IF EXISTS node_fts;");
+        /* Backfill search_terms for all existing nodes */
+        {
+            sqlite3_stmt *fill = NULL;
+            int frc = sqlite3_prepare_v2(s->db,
+                "SELECT id, name, file_path FROM nodes;", -1, &fill, NULL);
+            if (frc == SQLITE_OK) {
+                sqlite3_stmt *upd = NULL;
+                frc = sqlite3_prepare_v2(s->db,
+                    "UPDATE nodes SET search_terms = ?1 WHERE id = ?2;",
+                    -1, &upd, NULL);
+                if (frc == SQLITE_OK) {
+                    while (sqlite3_step(fill) == SQLITE_ROW) {
+                        int64_t id = sqlite3_column_int64(fill, 0);
+                        const char *nm = (const char *)sqlite3_column_text(fill, 1);
+                        const char *fp = (const char *)sqlite3_column_text(fill, 2);
+                        char *st = build_search_terms(nm ? nm : "", fp ? fp : "");
+                        sqlite3_bind_text(upd, 1, st, -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_int64(upd, 2, id);
+                        sqlite3_step(upd);
+                        sqlite3_reset(upd);
+                        sqlite3_clear_bindings(upd);
+                        free(st);
+                    }
+                    sqlite3_finalize(upd);
+                }
+                sqlite3_finalize(fill);
+            }
         }
     } else {
         sqlite3_finalize(stmt);
@@ -299,7 +405,7 @@ static int migrate_schema(cbm_store_t *s) {
 static int create_fts_table(cbm_store_t *s) {
     const char *fts_ddl =
         "CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5("
-        "  name, qualified_name, file_path,"
+        "  name, qualified_name, file_path, search_terms,"
         "  content=nodes, content_rowid=id,"
         "  tokenize='unicode61 tokenchars _'"
         ");";
@@ -311,20 +417,27 @@ static int create_fts_table(cbm_store_t *s) {
     /* Triggers to keep FTS5 in sync with nodes table */
     const char *triggers =
         "CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN"
-        "  INSERT INTO node_fts(rowid, name, qualified_name, file_path)"
-        "    VALUES (new.id, new.name, new.qualified_name, new.file_path);"
+        "  INSERT INTO node_fts(rowid, name, qualified_name, file_path, search_terms)"
+        "    VALUES (new.id, new.name, new.qualified_name, new.file_path, new.search_terms);"
         "END;"
         "CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN"
-        "  INSERT INTO node_fts(node_fts, rowid, name, qualified_name, file_path)"
-        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path);"
+        "  INSERT INTO node_fts(node_fts, rowid, name, qualified_name, file_path, search_terms)"
+        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path, old.search_terms);"
         "END;"
         "CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN"
-        "  INSERT INTO node_fts(node_fts, rowid, name, qualified_name, file_path)"
-        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path);"
-        "  INSERT INTO node_fts(rowid, name, qualified_name, file_path)"
-        "    VALUES (new.id, new.name, new.qualified_name, new.file_path);"
+        "  INSERT INTO node_fts(node_fts, rowid, name, qualified_name, file_path, search_terms)"
+        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path, old.search_terms);"
+        "  INSERT INTO node_fts(rowid, name, qualified_name, file_path, search_terms)"
+        "    VALUES (new.id, new.name, new.qualified_name, new.file_path, new.search_terms);"
         "END;";
-    return exec_sql(s, triggers);
+    rc = exec_sql(s, triggers);
+    if (rc != CBM_STORE_OK) return rc;
+
+    /* Rebuild FTS5 content from nodes table.
+     * Needed after migration adds search_terms and drops/recreates FTS5.
+     * Safe to call always — rebuild is a no-op if content is already in sync. */
+    exec_sql(s, "INSERT INTO node_fts(node_fts) VALUES('rebuild');");
+    return CBM_STORE_OK;
 }
 
 static int create_user_indexes(cbm_store_t *s) {
@@ -920,14 +1033,18 @@ int64_t cbm_store_upsert_node(cbm_store_t *s, const cbm_node_t *n) {
     sqlite3_stmt *stmt =
         prepare_cached(s, &s->stmt_upsert_node,
                        "INSERT INTO nodes (project, label, name, qualified_name, file_path, "
-                       "start_line, end_line, properties) "
-                       "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
+                       "start_line, end_line, properties, search_terms) "
+                       "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) "
                        "ON CONFLICT(project, qualified_name) DO UPDATE SET "
-                       "label=?2, name=?3, file_path=?5, start_line=?6, end_line=?7, properties=?8 "
+                       "label=?2, name=?3, file_path=?5, start_line=?6, end_line=?7, "
+                       "properties=?8, search_terms=?9 "
                        "RETURNING id;");
     if (!stmt) {
         return CBM_STORE_ERR;
     }
+
+    /* Build search_terms: CamelCase-split name + file basename for FTS5 */
+    char *search_terms = build_search_terms(safe_str(n->name), safe_str(n->file_path));
 
     bind_text(stmt, 1, safe_str(n->project));
     bind_text(stmt, 2, safe_str(n->label));
@@ -937,6 +1054,8 @@ int64_t cbm_store_upsert_node(cbm_store_t *s, const cbm_node_t *n) {
     sqlite3_bind_int(stmt, 6, n->start_line);
     sqlite3_bind_int(stmt, 7, n->end_line);
     bind_text(stmt, 8, safe_props(n->properties_json));
+    bind_text(stmt, 9, search_terms);
+    free(search_terms);
 
     int rc = sqlite3_step(stmt);
     if (rc == SQLITE_ROW) {
@@ -2794,7 +2913,7 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
      * we negate to get positive scores. */
     int rc = sqlite3_prepare_v2(
         s->db,
-        "SELECT n.id, -bm25(node_fts, 10.0, 5.0, 1.0) AS score, n.file_path "
+        "SELECT n.id, -bm25(node_fts, 10.0, 5.0, 1.0, 0.25) AS score, n.file_path "
         "FROM node_fts f "
         "JOIN nodes n ON n.id = f.rowid "
         "WHERE node_fts MATCH ?1 AND n.project = ?2 "
