@@ -6646,9 +6646,6 @@ static char *handle_context_locate(cbm_mcp_server_t *srv, const char *args) {
             yyjson_mut_obj_add_str(doc, item, "type", results[i].label);
         }
         yyjson_mut_obj_add_real(doc, item, "score", results[i].composite_score);
-        yyjson_mut_obj_add_real(doc, item, "ppr", results[i].ppr_score);
-        yyjson_mut_obj_add_real(doc, item, "bm25", results[i].bm25_score);
-        yyjson_mut_obj_add_real(doc, item, "betweenness", results[i].betweenness);
         if (results[i].start_line > 0) {
             yyjson_mut_obj_add_int(doc, item, "line", results[i].start_line);
         }
