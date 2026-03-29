@@ -6645,12 +6645,11 @@ static char *handle_context_locate(cbm_mcp_server_t *srv, const char *args) {
         if (results[i].label) {
             yyjson_mut_obj_add_str(doc, item, "type", results[i].label);
         }
-        yyjson_mut_obj_add_real(doc, item, "score", results[i].composite_score);
         if (results[i].start_line > 0) {
             yyjson_mut_obj_add_int(doc, item, "line", results[i].start_line);
         }
         yyjson_mut_arr_append(arr, item);
-        used += 120; /* approx per result */
+        used += 80; /* approx per result */
 
         /* Track symbol in session */
         if (srv->session && results[i].name) {
