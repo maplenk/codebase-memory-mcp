@@ -13,3 +13,16 @@ iteration	commit	metric	delta	guard	status	description
 10	e001016	60	1.0	2683	keep	per-file cap of 5 via FNV-1a hash — general anti-flood, beats hardcoded exclusion
 11	-	-1	-61.0	-	discard	BM25 file_path 1→8 + cap 5→3 combined — catastrophic
 12	4d0a0b0	72	12.0	2683	keep	restore v2 context tool + explore FTS fallback — C1 now scoring
+13	d300c60	73	1.0	2683	keep	in-degree authority signal (simplified HITS) — modest +1
+14	2ddcebb	93	20.0	2683	keep	reduce locate results 20→10 — byte penalty 52.6→32.0, C4 now scoring
+15	2685756	111	18.0	2683	keep	CamelCase splitting in FTS5 search_terms column (weight 0.25) — B5 +10
+16	9f066c0	112	1.0	2683	keep	per-file cap 5→3 — marginally more file diversity
+17	-	152	40.0	2683	discard	synonym expansion table — hardcodes project-specific knowledge (tax→navision)
+18	-	112	0.0	-	discard	W_PPR 0.35→0.45 — no change
+19	-	110	-2.0	-	discard	locate results 10→15 — byte penalty increase outweighs recall
+20	-	112	0.0	-	discard	FTS LIMIT 500→200 — no change
+21	-	111	-1.0	-	discard	1-hop neighbor expansion — adds bytes without new file hits, vocab gap unresolved
+22	-	112	0.0	-	discard	PPR iterations 15→25 — no change
+23	2c11513	120	8.0	2683	keep	remove ppr/bm25/betweenness from locate JSON — ~600 bytes saved per query
+24	-	114	-6.0	-	discard	explore FTS fallback 20→10 — lost file hits, explore needs more results
+25	b4cc9e6	123	3.0	2683	keep	remove composite score from locate JSON — position already conveys rank
