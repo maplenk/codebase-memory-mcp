@@ -1,0 +1,51 @@
+{"config":"claude-mcp","runs":[
+{
+  "id": "01_order_refunds__claude-yesmcp",
+  "tool": "claude-yesmcp",
+  "description": "01_order_refunds",
+  "elapsed_ms": 197524.306,
+  "output_bytes": 8303,
+  "est_tokens": 109523,
+  "num_turns": 8,
+  "cost_usd": 1.5651153999999998
+},
+{
+  "id": "02_converttoarray_blast__claude-yesmcp",
+  "tool": "claude-yesmcp",
+  "description": "02_converttoarray_blast",
+  "elapsed_ms": 58904.766,
+  "output_bytes": 4674,
+  "est_tokens": 157499,
+  "num_turns": 9,
+  "cost_usd": 0.19594875
+},
+{
+  "id": "03_new_payment_type__claude-yesmcp",
+  "tool": "claude-yesmcp",
+  "description": "03_new_payment_type",
+  "elapsed_ms": 214792.935,
+  "output_bytes": 4712,
+  "est_tokens": 49104,
+  "num_turns": 4,
+  "cost_usd": 0.75834045
+},
+{
+  "id": "04_credit_settlement_bug__claude-yesmcp",
+  "tool": "claude-yesmcp",
+  "description": "04_credit_settlement_bug",
+  "elapsed_ms": 165685.719,
+  "output_bytes": 0,
+  "est_tokens": 525682,
+  "num_turns": 16,
+  "cost_usd": 0.7282887499999999
+},
+{
+  "id": "05_invoice_fiscal_year__claude-yesmcp",
+  "tool": "claude-yesmcp",
+  "description": "05_invoice_fiscal_year",
+  "elapsed_ms": 154560.456,
+  "output_bytes": 4899,
+  "est_tokens": 146544,
+  "num_turns": 8,
+  "cost_usd": 0.5299453999999999
+}]}

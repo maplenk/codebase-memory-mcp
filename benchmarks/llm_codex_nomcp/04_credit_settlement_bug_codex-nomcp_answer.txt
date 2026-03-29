@@ -1,0 +1,41 @@
+`creditSettlement` is called from the API controller at [OrderController.php:222](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php#L222) and the real settlement logic is in [Order.php:2581](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L2581). There is a second entry into the same flow from `postAdvancePayment()` at [Order.php:3504](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L3504), which auto-builds an unpaid-order list and then calls `self::creditSettlement(...)` at [Order.php:3621](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L3621).
+
+Before the fix, `isNoCharge` was not actually enforced in settlement. The controller even populates `isNoCharge = 0` in the payload at [OrderController.php:848](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php#L848), but `creditSettlement()` did not use that field. That meant `isNoCharge=1` orders could still enter settlement, and settlement would process them like normal credit-sale orders: reduce `PAYMENT_CREDIT`, insert new payment/accounting rows, and update balances. That is the double-counting path.
+
+The exact fix needed is already present as local uncommitted changes in [Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php):
+
+```diff
+@@
+         $orderIDList = rtrim($orderIDList, ",");
+
++        $noChargeOrders = convertToArray(
++            DB::table($chainOrderSummaryTable)
++                ->whereIn('orderID', $orderIDArray)
++                ->where('isNoCharge', 1)
++                ->select('orderID')
++                ->distinct()
++                ->get()
++        );
++        if (!empty($noChargeOrders)) {
++            $status["status"] = false;
++            $status["message"] = "Credit settlement is not allowed for no-charge orders";
++            $status["orderIDs"] = array_column($noChargeOrders, 'orderID');
++            return $status;
++        }
++
+         // get customer balance
+```
+
+```diff
+@@
+-            $rawQuery = "SELECT os.orderID FROM {$orderSummaryTable} os " .
+-                        "INNER JOIN {$orderPaymentsTable} op ON os.orderID = op.orderID " .
+-                        "WHERE os.customersIDs = ? AND os.paymentStatus != ? AND op.paymentType = ? AND op.amount > 0 " .
+-                        "GROUP BY os.orderID";
++            $rawQuery = "SELECT os.orderID FROM {$orderSummaryTable} os " .
++                        "INNER JOIN {$orderPaymentsTable} op ON os.orderID = op.orderID " .
++                        "WHERE os.customersIDs = ? AND os.paymentStatus != ? AND os.isNoCharge = 0 AND op.paymentType = ? AND op.amount > 0 " .
++                        "GROUP BY os.orderID";
+```
+
+Those two changes are at [Order.php:2743](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L2743) and [Order.php:3610](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L3610). I verified syntax with `php -l`; I did not run broader tests.

@@ -1,0 +1,46 @@
+{"config":"codex-nomcp","runs":[
+{
+  "id": "01_order_refunds__codex-nomcp",
+  "tool": "codex-nomcp",
+  "description": "01_order_refunds",
+  "elapsed_ms": 414684.746,
+  "output_bytes": 8038,
+  "est_tokens": 6309946,
+  "tool_calls": 0
+},
+{
+  "id": "02_converttoarray_blast__codex-nomcp",
+  "tool": "codex-nomcp",
+  "description": "02_converttoarray_blast",
+  "elapsed_ms": 375479.869,
+  "output_bytes": 4878,
+  "est_tokens": 2696943,
+  "tool_calls": 0
+},
+{
+  "id": "03_new_payment_type__codex-nomcp",
+  "tool": "codex-nomcp",
+  "description": "03_new_payment_type",
+  "elapsed_ms": 382348.837,
+  "output_bytes": 7119,
+  "est_tokens": 7008118,
+  "tool_calls": 0
+},
+{
+  "id": "04_credit_settlement_bug__codex-nomcp",
+  "tool": "codex-nomcp",
+  "description": "04_credit_settlement_bug",
+  "elapsed_ms": 356293.947,
+  "output_bytes": 2904,
+  "est_tokens": 7271383,
+  "tool_calls": 0
+},
+{
+  "id": "05_invoice_fiscal_year__codex-nomcp",
+  "tool": "codex-nomcp",
+  "description": "05_invoice_fiscal_year",
+  "elapsed_ms": 314290.4,
+  "output_bytes": 6248,
+  "est_tokens": 2018372,
+  "tool_calls": 0
+}]}

@@ -1,0 +1,53 @@
+BNPL is not a single enum change in this codebase. Payment types are mostly data-driven from DB tables, but several order, export, and report paths still hardcode known `PAYMENT_*` values.
+
+**Where Payment Types Are Defined**
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L2554)` `getChainPaymentTypes()` reads payment modes from `globalTypeValues` (`typeID = 7`) plus `globalPaymentAccountMapping`.
+- `[app/Admin.php](/Users/naman/Documents/QBApps/qbapi/app/Admin.php#L7213)` manages store-level enablement in `store{storeID}_paymentSettings`; `addStorePaymentSettings()` also requires a matching `globalPaymentAccountMapping` row.
+- `[app/Http/Controllers/v2/SetupWeb.php](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/SetupWeb.php#L506)` exposes the add/update/get APIs for store payment settings.
+- `[app/QBChannel.php](/Users/naman/Documents/QBApps/qbapi/app/QBChannel.php#L104)` exposes payment modes for channel mappings from `globalTypeValues` and stores selections in `chain{chainID}_channelPaymentMap`.
+- `[scripts/helpers/convertPI.js](/Users/naman/Documents/QBApps/qbapi/scripts/helpers/convertPI.js#L297)` builds `paymentList` from `paymentSettings` plus global mappings for PI/online flows.
+- `[app/Friday.php](/Users/naman/Documents/QBApps/qbapi/app/Friday.php#L729)` copies payment settings across stores.
+
+You will need DB/config changes even if you touch no PHP:
+- Add BNPL to `globalTypeValues` with `typeID = 7`
+- Add a `globalPaymentAccountMapping` row for BNPL
+- Enable BNPL in each `store{n}_paymentSettings`
+- If channels use it, add it to `chain{n}_channelPaymentMap`
+
+**Controllers And Processing**
+- `[app/Http/Controllers/OrderController.php](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php#L514)` and `[app/Http/Controllers/v2/OrderController.php](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/OrderController.php#L123)` are the main POS order endpoints.
+- `[app/Http/Controllers/OrderController.php](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php#L153)` is the manual order endpoint.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L7900)` `postOrder()` is the core order write path.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L6385)` `createPaymentTransactions()` serializes `paymentList` into payment rows.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L2581)` `creditSettlement()` handles post-sale settlement against outstanding credit.
+- `[app/Http/Controllers/OrderController.php](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php#L801)` and `[app/Http/Controllers/v2/OrderController.php](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/OrderController.php#L181)` only special-case `PAYMENT_CREDIT`. If BNPL should behave like a financed receivable, this logic needs review.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L377)` and `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L25789)` rewrite unknown online/PI payment types to `PAYMENT_POCKET`. BNPL must be added here or it will be lost.
+
+**Database Tables That Store Payment Data**
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L7930)` declares the main payment tables: store `orderPayments`, chain `orderPayments`, chain `invoicePayments`, plus `orderAccounting`.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L2594)` declares `creditPaymentSummary` and `creditPaymentDetail` for settlement/credit-note flows.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L11559)` and `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L16796)` insert order payment rows.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L3168)` inserts settlement detail rows.
+- `[app/Scripts.php](/Users/naman/Documents/QBApps/qbapi/app/Scripts.php#L13315)` updates both `orderPayments` and `orderAccounting` when payment mode corrections are made.
+
+Likely no schema migration is needed for basic BNPL because these tables already store generic `paymentType`, `transactionID`, `referenceID`, `approvalCode`, `partyName`, etc. If you need BNPL-specific metadata like lender, plan, tenure, or due date, then add columns to `orderPayments`, `invoicePayments`, and probably `creditPaymentDetail`.
+
+**Validation**
+- `[app/schema/paymentSchema.json](/Users/naman/Documents/QBApps/qbapi/app/schema/paymentSchema.json)` validates shape only; it does not enumerate allowed payment types.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L1981)` `jsonChecks()` invokes that schema.
+- `[app/Admin.php](/Users/naman/Documents/QBApps/qbapi/app/Admin.php#L7232)` is the real gatekeeper for enablement, because store payment settings fail without a global payment-account mapping.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L3370)` has tender-declaration checks that only trigger for `PAYMENT_CASH`; BNPL probably does not need changes there unless you want BNPL treated as a tender-declaration mode.
+
+**Reporting And Settlement Code**
+- `[app/v3/reports/OrderReport.php](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/OrderReport.php#L141)` and `[app/v3/reports/OrderReport.php](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/OrderReport.php#L798)` have explicit `PAYMENT_*` filter and display-name switches.
+- `[app/v3/reports/SalesReport.php](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/SalesReport.php#L494)` and `[app/v3/reports/SalesReport.php](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/SalesReport.php#L6166)` hardcode payment buckets and filters.
+- `[app/v3/reports/WrappedReport.php](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/WrappedReport.php#L669)` hardcodes “digital methods”; add BNPL here if it should count as digital.
+- `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L20990)` and `[app/mysquareOrder.php](/Users/naman/Documents/QBApps/qbapi/app/mysquareOrder.php#L1372)` map payment codes to human-readable labels.
+- `[app/Navision.php](/Users/naman/Documents/QBApps/qbapi/app/Navision.php#L2107)` maps payment type to external tender codes; required if Navision export is in use.
+- `[app/Municipal.php](/Users/naman/Documents/QBApps/qbapi/app/Municipal.php#L4959)` classifies payment modes for municipal integrations.
+- `[scripts/reports/elrreport.js](/Users/naman/Documents/QBApps/qbapi/scripts/reports/elrreport.js#L365)` has explicit special handling for `PAYMENT_POSTPAY`; BNPL likely belongs in the same family.
+- `[scripts/reports/dashboards.js](/Users/naman/Documents/QBApps/qbapi/scripts/reports/dashboards.js#L168)` and `[scripts/reports/thirdParty.js](/Users/naman/Documents/QBApps/qbapi/scripts/reports/thirdParty.js#L237)` mostly read from `globalTypeValues`, so they are more likely to pick BNPL up automatically once the DB rows exist.
+
+Minimum code surface I’d plan for: `[app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php)`, `[app/Admin.php](/Users/naman/Documents/QBApps/qbapi/app/Admin.php)`, `[app/Http/Controllers/OrderController.php](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php)`, `[app/Http/Controllers/v2/OrderController.php](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/OrderController.php)`, `[app/v3/reports/OrderReport.php](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/OrderReport.php)`, `[app/v3/reports/SalesReport.php](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/SalesReport.php)`, and whatever export/integration files your deployment actually uses (`Navision`, `Municipal`, `mysquareOrder`, `elrreport`).
+
+If you want, I can turn this into a concrete implementation checklist with “must change” vs “conditional by module” files.

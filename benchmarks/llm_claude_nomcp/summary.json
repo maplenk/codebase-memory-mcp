@@ -1,0 +1,51 @@
+{"config":"claude-nomcp","runs":[
+{
+  "id": "01_order_refunds__claude-nomcp",
+  "tool": "claude-nomcp",
+  "description": "01_order_refunds",
+  "elapsed_ms": 215444.349,
+  "output_bytes": 7723,
+  "est_tokens": 58100,
+  "num_turns": 5,
+  "cost_usd": 1.2016197999999998
+},
+{
+  "id": "02_converttoarray_blast__claude-nomcp",
+  "tool": "claude-nomcp",
+  "description": "02_converttoarray_blast",
+  "elapsed_ms": 52169.391,
+  "output_bytes": 4287,
+  "est_tokens": 75015,
+  "num_turns": 5,
+  "cost_usd": 0.19440275
+},
+{
+  "id": "03_new_payment_type__claude-nomcp",
+  "tool": "claude-nomcp",
+  "description": "03_new_payment_type",
+  "elapsed_ms": 187502.119,
+  "output_bytes": 5596,
+  "est_tokens": 55426,
+  "num_turns": 5,
+  "cost_usd": 1.0878146
+},
+{
+  "id": "04_credit_settlement_bug__claude-nomcp",
+  "tool": "claude-nomcp",
+  "description": "04_credit_settlement_bug",
+  "elapsed_ms": 96794.386,
+  "output_bytes": 0,
+  "est_tokens": 635178,
+  "num_turns": 16,
+  "cost_usd": 0.726585
+},
+{
+  "id": "05_invoice_fiscal_year__claude-nomcp",
+  "tool": "claude-nomcp",
+  "description": "05_invoice_fiscal_year",
+  "elapsed_ms": 155254.288,
+  "output_bytes": 6183,
+  "est_tokens": 88132,
+  "num_turns": 6,
+  "cost_usd": 0.5467366499999999
+}]}

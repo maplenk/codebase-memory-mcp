@@ -1,0 +1,81 @@
+{"runs": [
+{
+  "id": "locate_order",
+  "tool": "search_graph",
+  "description": "Find code related to order processing",
+  "elapsed_ms": 79.155,
+  "output_bytes": 7136,
+  "est_tokens": 1784
+},
+{
+  "id": "locate_payment",
+  "tool": "search_graph",
+  "description": "Find payment settlement code",
+  "elapsed_ms": 91.016,
+  "output_bytes": 7265,
+  "est_tokens": 1816
+},
+{
+  "id": "locate_inventory",
+  "tool": "search_graph",
+  "description": "Find inventory/stock management code",
+  "elapsed_ms": 107.551,
+  "output_bytes": 7147,
+  "est_tokens": 1786
+},
+{
+  "id": "impact_postord",
+  "tool": "get_impact_analysis",
+  "description": "Blast radius of changing postOrd",
+  "elapsed_ms": 23.407,
+  "output_bytes": 751,
+  "est_tokens": 187
+},
+{
+  "id": "impact_converttoarray",
+  "tool": "get_impact_analysis",
+  "description": "Blast radius of convertToArray",
+  "elapsed_ms": 49.951,
+  "output_bytes": 6580,
+  "est_tokens": 1645
+},
+{
+  "id": "trace_order_to_receipt",
+  "tool": "trace_call_path",
+  "description": "Trace call path from postOrd to sendReceipt",
+  "elapsed_ms": 19.514,
+  "output_bytes": 92,
+  "est_tokens": 23
+},
+{
+  "id": "architecture_overview",
+  "tool": "get_architecture",
+  "description": "Get architecture overview of qbapi",
+  "elapsed_ms": 22.336,
+  "output_bytes": 929,
+  "est_tokens": 232
+},
+{
+  "id": "explore_loyalty",
+  "tool": "explore",
+  "description": "Explore loyalty system",
+  "elapsed_ms": 246.294,
+  "output_bytes": 6608,
+  "est_tokens": 1652
+},
+{
+  "id": "understand_creditsettlement",
+  "tool": "understand",
+  "description": "Understand creditSettlement function",
+  "elapsed_ms": 326.689,
+  "output_bytes": 5210,
+  "est_tokens": 1302
+},
+{
+  "id": "key_symbols_global",
+  "tool": "get_key_symbols",
+  "description": "Get globally important symbols by PageRank",
+  "elapsed_ms": 29.618,
+  "output_bytes": 5229,
+  "est_tokens": 1307
+}]}

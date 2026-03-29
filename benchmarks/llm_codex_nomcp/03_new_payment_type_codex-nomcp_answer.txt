@@ -1,0 +1,47 @@
+Assuming this is a new tender code like `PAYMENT_BNPL`, not just a UI label. In this codebase, the write path is mostly data-driven, so the core work is registration plus a sweep of hardcoded reporting/export mappings.
+
+**Registration**
+- Add the new payment type in [`cloud_schema/globals.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/globals.sql#L1931) as a `globalTypeValues` row with `typeID = 7`.
+- Map it to an account type in [`cloud_schema/globals.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/globals.sql#L1821) via `globalTypePaymentAccountIDMapping` so the POS can resolve the accounting side.
+- Enable it per store in [`cloud_schema/store.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/store.sql#L343) using `storeN_paymentSettings`.
+- The APIs that expose/add/update store payment settings are [`app/Http/routes.php`](/Users/naman/Documents/QBApps/qbapi/app/Http/routes.php#L2954), [`app/Http/Controllers/adminController.php`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/adminController.php#L2069), and [`app/Admin.php`](/Users/naman/Documents/QBApps/qbapi/app/Admin.php#L7213).
+- The runtime payment list shown to the POS is built from `paymentSettings + globalTypeValues + payment/account mapping` in [`app/Store.php`](/Users/naman/Documents/QBApps/qbapi/app/Store.php#L640).
+- If channels use allowed payment-mode lists, update channel mappings too in [`app/QBChannel.php`](/Users/naman/Documents/QBApps/qbapi/app/QBChannel.php#L104).
+
+**Payment Processing**
+- Order creation enters through [`app/Http/Controllers/OrderController.php`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php#L153) and the v2 controller path in [`app/Http/Controllers/v2/OrderController.php`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/OrderController.php#L162), both of which call `Order::postOrder`.
+- The payment rows themselves are built in [`app/Order.php`](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L6385). This method already copies arbitrary `paymentType` strings, so `PAYMENT_BNPL` will flow if registration/account mapping is correct.
+- Settlement endpoints are wired in [`app/Http/routes.php`](/Users/naman/Documents/QBApps/qbapi/app/Http/routes.php#L413) and handled by `OrderController@creditSettlement`, `@settleOrder`, `@postAdvancePayment`, `@postAdvanceDebit`.
+- The main settlement logic is in [`app/Order.php`](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L2581), [`app/Order.php`](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L3489), [`app/Order.php`](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L4410), and [`app/Order.php`](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L17068).
+- If BNPL is provider-backed rather than generic, there is already Snapmint-specific BNPL-like integration in [`app/snapMint.php`](/Users/naman/Documents/QBApps/qbapi/app/snapMint.php#L122) and gateway state in [`cloud_schema/globals.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/globals.sql#L6435).
+
+**Database Tables**
+- Payment config/registration: [`cloud_schema/globals.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/globals.sql#L1821), [`cloud_schema/globals.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/globals.sql#L1931), [`cloud_schema/store.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/store.sql#L343).
+- Primary order payment storage: [`cloud_schema/store.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/store.sql#L225) (`storeN_orderPayments`) and [`cloud_schema/chain.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/chain.sql#L12418) (`chainN_orderPayments`).
+- Credit/advance settlement storage: [`cloud_schema/chain.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/chain.sql#L4753), [`cloud_schema/chain.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/chain.sql#L4977), [`cloud_schema/chain.sql`](/Users/naman/Documents/QBApps/qbapi/cloud_schema/chain.sql#L1166).
+- No table schema change is required just to store BNPL itself, because `paymentType` is already `varchar`. The change is mostly seed/config data.
+
+**Validation**
+- JSON schema validation is generic today: [`app/schema/paymentSchema.json`](/Users/naman/Documents/QBApps/qbapi/app/schema/paymentSchema.json#L1), [`app/schema/orderSchema.json`](/Users/naman/Documents/QBApps/qbapi/app/schema/orderSchema.json#L129), [`app/schema/updateOrder.json`](/Users/naman/Documents/QBApps/qbapi/app/schema/updateOrder.json#L148), executed by [`app/JSONSchema.php`](/Users/naman/Documents/QBApps/qbapi/app/JSONSchema.php#L15) and invoked from [`app/Order.php`](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L1981).
+- That means you probably do not need to change schema files just to allow `PAYMENT_BNPL`.
+- You do need the payment/account mapping in place, otherwise adding the store payment setting is rejected in [`app/Admin.php`](/Users/naman/Documents/QBApps/qbapi/app/Admin.php#L7232).
+- If BNPL requires extra fields like lender reference, provider transaction ID, EMI plan ID, or mandatory refund metadata, then extend [`app/schema/paymentSchema.json`](/Users/naman/Documents/QBApps/qbapi/app/schema/paymentSchema.json#L1) and [`app/schema/updateOrder.json`](/Users/naman/Documents/QBApps/qbapi/app/schema/updateOrder.json#L148).
+
+**Reporting / Settlement / Exports**
+- Dynamic reports that join `globalTypeValues` will mostly pick up BNPL automatically once registered, for example [`app/chart.php`](/Users/naman/Documents/QBApps/qbapi/app/chart.php#L106) and the payment aggregation in [`app/v3/reports/OrderReport.php`](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/OrderReport.php#L1412).
+- Hardcoded label/filter logic will need explicit BNPL cases:
+  - [`app/helpers.php`](/Users/naman/Documents/QBApps/qbapi/app/helpers.php#L2279)
+  - [`app/v2/report.php`](/Users/naman/Documents/QBApps/qbapi/app/v2/report.php#L1731)
+  - [`app/v2/report.php`](/Users/naman/Documents/QBApps/qbapi/app/v2/report.php#L2428)
+  - [`app/v2/report.php`](/Users/naman/Documents/QBApps/qbapi/app/v2/report.php#L20170)
+  - [`app/v3/reports/OrderReport.php`](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/OrderReport.php#L794)
+  - [`app/v3/reports/SalesReport.php`](/Users/naman/Documents/QBApps/qbapi/app/v3/reports/SalesReport.php#L6255)
+  - [`scripts/reports/elrreport.js`](/Users/naman/Documents/QBApps/qbapi/scripts/reports/elrreport.js#L173)
+  - [`scripts/reports/elrreport.js`](/Users/naman/Documents/QBApps/qbapi/scripts/reports/elrreport.js#L363)
+  - Legacy report stack in [`app/report.php`](/Users/naman/Documents/QBApps/qbapi/app/report.php#L1682)
+- External tender/export mappings will also need BNPL codes if used:
+  - [`app/NavisionNew.php`](/Users/naman/Documents/QBApps/qbapi/app/NavisionNew.php#L62)
+  - [`app/NavisionClone.php`](/Users/naman/Documents/QBApps/qbapi/app/NavisionClone.php#L3528)
+  - [`app/report.php`](/Users/naman/Documents/QBApps/qbapi/app/report.php#L16916)
+
+If you want, I can turn this into a smaller “must change vs nice to review” checklist for `PAYMENT_BNPL`, or trace the exact migration/seed path you’d use to register it end-to-end.

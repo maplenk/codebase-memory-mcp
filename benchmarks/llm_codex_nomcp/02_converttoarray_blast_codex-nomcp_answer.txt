@@ -1,0 +1,55 @@
+**Scope**
+
+[`convertToArray` in `app/helpers.php`](/Users/naman/Documents/QBApps/qbapi/app/helpers.php#L1296) is not a local helper. It is a cross-cutting normalization layer: it forces associative-array output via `json_decode(json_encode($data), true)` and sanitizes nested scalar values.
+
+A token-based scan of `app/**/*.php` found:
+- `12,977` raw invocations
+- `6,292` unique enclosing functions/methods that directly call it
+- `326` app files touched
+- `3,443` unique callers in HTTP controllers
+- `2,571` unique callers in models/services/domain code
+- `55` unique callers in console commands
+
+**Most Critical Callers**
+
+The highest-risk callers are the ones on request-entry, order, reporting, and integration paths:
+
+- [`appController::insertDeviceSettlementLog`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/appController.php#L67) converts request JSON, then immediately does `new V($data)` at line 77. That validator path expects an array.
+- [`UnicommerceController::oauth`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/UnicommerceController.php#L18) is representative of about `60` Unicommerce controller methods that parse request bodies with `convertToArray(...)` before handing data to integration logic.
+- [`Order::checkForLastOrderID`](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L86) and [`Order::getPendingPICounts`](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L118) use `count($results)` and `$results[0]['...']` in core order flows.
+- [`thirdParty::generateThirdPartyToken`](/Users/naman/Documents/QBApps/qbapi/app/thirdParty.php#L43) is representative of about `110` third-party integration methods that index into converted DB results with `$rows[0]['...']`.
+- Reporting is also heavily exposed: [`app/report.php`](/Users/naman/Documents/QBApps/qbapi/app/report.php), [`app/v2/report.php`](/Users/naman/Documents/QBApps/qbapi/app/v2/report.php), [`reportController`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/reportController.php), and [`v2/reportController`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/reportController.php) together account for hundreds of direct callers.
+
+**What Breaks If Return Type Changes To Object**
+
+A change from array to object would break broadly and immediately.
+
+- Any caller using `$data['x']` or `$rows[0]['x']` breaks with object access errors.
+- Any caller passing the result into array-oriented code breaks: `new V($data)`, `array_column`, `array_merge`, helpers like `createArrayKey($array, ...)`, and many `count()/sizeof()` sites.
+- Request-body entrypoints break first, because most controllers do `convertToArray(json_decode($result))` and then treat the payload as an associative array.
+- DB-result consumers break next, because the codebase assumes query results become arrays of associative arrays.
+- There is also a helper-internal risk: if you naively switch `json_decode(..., true)` to object mode, the sanitizer in [`app/helpers.php`](/Users/naman/Documents/QBApps/qbapi/app/helpers.php#L1298) no longer matches the data shape. Top-level objects would bypass sanitization, and arrays of objects would hit the scalar sanitization path incorrectly.
+
+**Tests To Run**
+
+There is no direct automated coverage for `convertToArray`: `tests/**/*.php` contains no direct references to it.
+
+You would need:
+- Full PHPUnit suite: `vendor/bin/phpunit`
+- API smoke/regression for request-parsing controllers:
+  [`appController`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/appController.php),
+  [`thirdPartyController`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/thirdPartyController.php),
+  [`reportController`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/reportController.php),
+  [`v2/reportController`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/reportController.php),
+  [`v2/UnicommerceController`](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/v2/UnicommerceController.php)
+- Transaction regression for [`app/Order.php`](/Users/naman/Documents/QBApps/qbapi/app/Order.php) and [`app/OnlineOrder.php`](/Users/naman/Documents/QBApps/qbapi/app/OnlineOrder.php)
+- Third-party integration regression for [`app/thirdParty.php`](/Users/naman/Documents/QBApps/qbapi/app/thirdParty.php)
+- Report endpoint smoke tests for v1/v2/v3 report stacks
+- Console command dry-runs for stock alerts, license reminders, and Unicommerce dispatch paths
+- If you have a runner for the fixtures under [`tests/Order/orderjson`](/Users/naman/Documents/QBApps/qbapi/tests/Order/orderjson), replay representative order scenarios; if not, manual payload replay is needed
+
+**Risk**
+
+`CRITICAL`
+
+This is a foundational helper with thousands of direct function/method callers on core order, reporting, and integration paths. Changing it from array to object is a system-wide contract break, not a local refactor.

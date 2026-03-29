@@ -1,0 +1,123 @@
+[
+  {
+    "id": "A1",
+    "tier": "A",
+    "description": "Find the FiscalYearController class",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "FiscalYearController", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["FiscalYearController.php"]
+  },
+  {
+    "id": "A2",
+    "tier": "A",
+    "description": "Find the postOrd function",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "postOrd", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["OrderController.php"],
+    "expected_symbols": ["postOrd"]
+  },
+  {
+    "id": "A3",
+    "tier": "A",
+    "description": "Find the POST route for order API",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "POST route order", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["routes.php", "OrderController.php"]
+  },
+  {
+    "id": "A4",
+    "tier": "A",
+    "description": "Find the Order model class definition",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "Order model", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["Order.php"]
+  },
+  {
+    "id": "B1",
+    "tier": "B",
+    "description": "Search for payment processing and billing logic",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "payment processing and billing logic", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["OrderController.php", "PaymentMappingService.php"]
+  },
+  {
+    "id": "B2",
+    "tier": "B",
+    "description": "Search for user authentication and session management",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "user authentication and session management", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["OauthMiddleware.php", "webMiddleware.php"]
+  },
+  {
+    "id": "B3",
+    "tier": "B",
+    "description": "Search for inventory stock calculation",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "inventory stock calculation", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["InventoryController.php"]
+  },
+  {
+    "id": "B4",
+    "tier": "B",
+    "description": "Search for CRM loyalty points redemption",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "CRM loyalty points redemption", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["Order.php", "basicAppController.php"]
+  },
+  {
+    "id": "B5",
+    "tier": "B",
+    "description": "Search for middleware that checks user permissions",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "middleware that checks user permissions", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["OauthMiddleware.php", "MerchantMiddleware.php"]
+  },
+  {
+    "id": "B6",
+    "tier": "B",
+    "description": "Search for omnichannel integration sync logic",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "omnichannel integration sync", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["InventoryController.php", "Unicommerce.php", "EasyEcom.php"]
+  },
+  {
+    "id": "B7",
+    "tier": "B",
+    "description": "Search for how POS billing works",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "POS billing", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["OrderController.php", "basicAppController.php"]
+  },
+  {
+    "id": "C1",
+    "tier": "C",
+    "description": "Complete flow of creating a new order end to end",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "complete flow of creating a new order end to end", "mode": "explore"},
+    "expected_files": ["OrderController.php", "Order.php", "routes.php"]
+  },
+  {
+    "id": "C2",
+    "tier": "C",
+    "description": "How the system handles failed payments",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "how the system handles failed payments", "mode": "explore"},
+    "expected_files": ["OrderController.php", "PaymentMappingService.php"]
+  },
+  {
+    "id": "C3",
+    "tier": "C",
+    "description": "All places where tax calculation happens",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "all places where tax calculation happens", "mode": "locate", "max_tokens": 2000},
+    "expected_files": ["NavisionNew.php", "NavisionClone.php", "thirdParty.php"]
+  },
+  {
+    "id": "C4",
+    "tier": "C",
+    "description": "What happens when a customer redeems loyalty points",
+    "tool": "context",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "query": "what happens when a customer redeems loyalty points", "mode": "explore"},
+    "expected_files": ["Order.php", "basicAppController.php"]
+  }
+]

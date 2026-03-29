@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CBM Benchmarks</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2129; --border: #30363d;
+    --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
+    --orange: #db8b3e; --cyan: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: var(--bg); color: var(--text); padding: 24px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 1.4em; margin-bottom: 4px; }
+  h2 { font-size: 1.1em; color: var(--accent); margin: 28px 0 12px; }
+  h3 { font-size: 0.95em; color: var(--text); margin: 16px 0 8px; }
+  .subtitle { color: var(--text-dim); font-size: 0.85em; margin-bottom: 20px; }
+  .loading { text-align: center; padding: 48px; color: var(--text-dim); }
+
+  /* Stat cards */
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; min-width: 120px; flex: 1; }
+  .stat-value { font-size: 1.4em; font-weight: 700; }
+  .stat-label { font-size: 0.7em; color: var(--text-dim); text-transform: uppercase; margin-top: 4px; letter-spacing: 0.03em; }
+  .v-accent { color: var(--accent); }
+  .v-green { color: var(--green); }
+  .v-red { color: var(--red); }
+  .v-yellow { color: var(--yellow); }
+  .v-purple { color: var(--purple); }
+  .v-cyan { color: var(--cyan); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; margin-bottom: 20px; background: var(--surface); border-radius: 8px; padding: 4px; overflow-x: auto; }
+  .tab { padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.82em; color: var(--text-dim); transition: all 0.15s; white-space: nowrap; border: none; background: none; font-family: inherit; }
+  .tab:hover { color: var(--text); background: rgba(88,166,255,0.06); }
+  .tab.active { background: var(--accent); color: #fff; font-weight: 600; }
+  .tab-count { display: inline-block; background: rgba(255,255,255,0.15); border-radius: 10px; padding: 1px 7px; font-size: 0.85em; margin-left: 6px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+  th { background: var(--surface2); text-align: left; padding: 10px 14px; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+  td { padding: 8px 14px; font-size: 0.85em; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(88,166,255,0.04); }
+  tr.total { background: var(--surface2); font-weight: 600; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--red); }
+  .neg { color: var(--green); }
+  .zero { color: var(--text-dim); }
+  .tool-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; }
+  .badge-cli { background: rgba(88,166,255,0.1); color: var(--accent); }
+  .badge-llm { background: rgba(188,140,255,0.1); color: var(--purple); }
+
+  /* Charts */
+  .chart-section { margin-bottom: 28px; }
+  .chart-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .chart-label { width: 180px; font-size: 0.78em; color: var(--text-dim); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chart-bars { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .bar-container { display: flex; align-items: center; gap: 8px; }
+  .bar { height: 16px; border-radius: 3px; min-width: 2px; transition: width 0.3s ease; }
+  .bar-label { font-size: 0.72em; color: var(--text-dim); white-space: nowrap; }
+  .legend { display: flex; gap: 16px; margin-bottom: 12px; font-size: 0.78em; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+
+  /* Sections */
+  .section { display: none; }
+  .section.active { display: block; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .card-title { font-size: 0.82em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.04em; }
+
+  /* Comparison grid */
+  .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .delta-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: 600; }
+  .delta-badge.better { background: rgba(63,185,80,0.15); color: var(--green); }
+  .delta-badge.worse { background: rgba(248,81,73,0.15); color: var(--red); }
+  .delta-badge.same { background: rgba(139,148,158,0.15); color: var(--text-dim); }
+</style>
+</head>
+<body>
+<h1>Codebase Memory MCP &mdash; Benchmarks</h1>
+<p class="subtitle">Auto-loaded from <code>index.json</code>. Must be served via HTTP: <code>cd benchmarks && python3 -m http.server 8765</code> then open <a href="http://localhost:8765/viewer.html">localhost:8765/viewer.html</a></p>
+
+<div id="app"><p class="loading">Loading runs...</p></div>
+
+<script>
+const COLORS = ['#58a6ff','#bc8cff','#3fb950','#db8b3e','#39d2c0','#f85149','#d29922','#f778ba'];
+
+let allRuns = {}; // {name: {runs: [...]}}
+
+let basePath = ''; // auto-detected: '' (served from benchmarks/) or 'benchmarks/'
+
+async function init() {
+  // Detect file:// protocol — fetch won't work
+  if (location.protocol === 'file:') {
+    document.getElementById('app').innerHTML = '<p class="loading">Cannot load data via <code>file://</code> protocol.<br><br>Start a server: <code>cd benchmarks && python3 -m http.server 8765</code><br>Then open: <a href="http://localhost:8765/viewer.html">http://localhost:8765/viewer.html</a></p>';
+    return;
+  }
+  let runNames = [];
+
+  // Try multiple base paths to support serving from benchmarks/ or project root
+  for (const tryBase of ['', 'benchmarks/']) {
+    try {
+      const r = await fetch(tryBase + 'index.json');
+      if (r.ok) {
+        runNames = await r.json();
+        basePath = tryBase;
+        break;
+      }
+    } catch(e) {}
+  }
+
+  if (!runNames.length) {
+    document.getElementById('app').innerHTML = '<p class="loading">No runs found. Run <code>./benchmarks/run_baseline.sh</code> first.<br><br>Serve from project root: <code>cd codebase-memory-mcp && python3 -m http.server</code><br>Or from benchmarks: <code>cd benchmarks && python3 -m http.server</code></p>';
+    return;
+  }
+
+  // Load all summaries in parallel
+  const results = await Promise.all(runNames.map(async name => {
+    try {
+      const r = await fetch(basePath + name + '/summary.json');
+      if (!r.ok) return null;
+      return {name, data: await r.json()};
+    } catch(e) { return null; }
+  }));
+
+  for (const r of results) {
+    if (r) allRuns[r.name] = r.data;
+  }
+
+  renderApp();
+}
+
+function classify(name) {
+  if (name.startsWith('llm_') || name.includes('claude') || name.includes('codex')) return 'llm';
+  return 'cli';
+}
+
+function fmt(n, d=1) { return typeof n === 'number' ? n.toFixed(d) : '-'; }
+function fmtK(n) { return n >= 1000 ? (n/1000).toFixed(1)+'K' : n.toString(); }
+function fmtInt(n) { return typeof n === 'number' ? n.toLocaleString() : '-'; }
+function pctDelta(a, b) { if (!a) return {pct: 0, cls: 'same'}; const p = ((b-a)/a)*100; return {pct: p, cls: p < -5 ? 'better' : p > 5 ? 'worse' : 'same'}; }
+
+function totals(data) {
+  return data.runs.reduce((t, r) => ({
+    ms: t.ms + r.elapsed_ms,
+    bytes: t.bytes + r.output_bytes,
+    tokens: t.tokens + r.est_tokens,
+    cost: t.cost + (r.cost_usd || 0),
+    turns: t.turns + (r.num_turns || 0),
+    count: t.count + 1
+  }), {ms:0, bytes:0, tokens:0, cost:0, turns:0, count:0});
+}
+
+function renderApp() {
+  const names = Object.keys(allRuns);
+  const cliRuns = names.filter(n => classify(n) === 'cli');
+  const llmRuns = names.filter(n => classify(n) === 'llm');
+
+  let html = '';
+
+  // Tabs
+  html += '<div class="tabs">';
+  html += `<button class="tab active" onclick="showSection('overview')">Overview</button>`;
+  if (cliRuns.length) html += `<button class="tab" onclick="showSection('cli')">CLI Benchmarks<span class="tab-count">${cliRuns.length}</span></button>`;
+  if (llmRuns.length) html += `<button class="tab" onclick="showSection('llm')">LLM Benchmarks<span class="tab-count">${llmRuns.length}</span></button>`;
+  for (const name of names) {
+    html += `<button class="tab" onclick="showSection('run_${name}')">${name}</button>`;
+  }
+  html += '</div>';
+
+  // Overview section
+  html += '<div class="section active" id="sec_overview">';
+  html += renderOverview(names, cliRuns, llmRuns);
+  html += '</div>';
+
+  // CLI section
+  if (cliRuns.length) {
+    html += '<div class="section" id="sec_cli">';
+    html += renderCliComparison(cliRuns);
+    html += '</div>';
+  }
+
+  // LLM section
+  if (llmRuns.length) {
+    html += '<div class="section" id="sec_llm">';
+    html += renderLlmComparison(llmRuns);
+    html += '</div>';
+  }
+
+  // Individual run sections
+  for (const name of names) {
+    html += `<div class="section" id="sec_run_${name}">`;
+    html += renderSingleRun(name, allRuns[name]);
+    html += '</div>';
+  }
+
+  document.getElementById('app').innerHTML = html;
+}
+
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  const sec = document.getElementById('sec_' + id);
+  if (sec) sec.classList.add('active');
+  event.target.classList.add('active');
+}
+
+/* ── Overview ──────────────────────────────────────────── */
+function renderOverview(names, cliRuns, llmRuns) {
+  let html = '<h2>All Runs</h2>';
+
+  // Summary cards
+  html += '<div class="stats">';
+  html += `<div class="stat"><div class="stat-value v-accent">${names.length}</div><div class="stat-label">Total Runs</div></div>`;
+  html += `<div class="stat"><div class="stat-value v-cyan">${cliRuns.length}</div><div class="stat-label">CLI Benchmarks</div></div>`;
+  html += `<div class="stat"><div class="stat-value v-purple">${llmRuns.length}</div><div class="stat-label">LLM Benchmarks</div></div>`;
+
+  let totalTests = 0;
+  for (const n of names) totalTests += allRuns[n].runs.length;
+  html += `<div class="stat"><div class="stat-value v-green">${totalTests}</div><div class="stat-label">Total Test Cases</div></div>`;
+  html += '</div>';
+
+  // Runs table
+  html += '<table><tr><th>Run</th><th>Type</th><th class="num">Tests</th><th class="num">Total Time</th><th class="num">Total Tokens</th><th class="num">Cost</th></tr>';
+  for (const name of names) {
+    const t = totals(allRuns[name]);
+    const type = classify(name);
+    html += `<tr>`;
+    html += `<td><strong>${name}</strong></td>`;
+    html += `<td><span class="tool-badge ${type === 'cli' ? 'badge-cli' : 'badge-llm'}">${type.toUpperCase()}</span></td>`;
+    html += `<td class="num">${t.count}</td>`;
+    html += `<td class="num">${t.ms >= 1000 ? fmt(t.ms/1000)+'s' : fmt(t.ms)+'ms'}</td>`;
+    html += `<td class="num">${fmtK(t.tokens)}</td>`;
+    html += `<td class="num">${t.cost > 0 ? '$'+fmt(t.cost, 3) : '-'}</td>`;
+    html += `</tr>`;
+  }
+  html += '</table>';
+
+  // Quick comparison: if there are 2+ CLI runs, show delta
+  if (cliRuns.length >= 2) {
+    const a = cliRuns[0], b = cliRuns[cliRuns.length - 1];
+    const tA = totals(allRuns[a]), tB = totals(allRuns[b]);
+    const dTime = pctDelta(tA.ms, tB.ms);
+    const dTokens = pctDelta(tA.tokens, tB.tokens);
+    html += `<h3>CLI Quick Compare: ${a} vs ${b}</h3>`;
+    html += '<div class="stats">';
+    html += `<div class="stat"><div class="stat-value">${fmt(tA.ms)}ms</div><div class="stat-label">${a} Time</div></div>`;
+    html += `<div class="stat"><div class="stat-value">${fmt(tB.ms)}ms</div><div class="stat-label">${b} Time</div></div>`;
+    html += `<div class="stat"><div class="stat-value"><span class="delta-badge ${dTime.cls}">${dTime.pct > 0 ? '+' : ''}${fmt(dTime.pct)}%</span></div><div class="stat-label">Time Delta</div></div>`;
+    html += `<div class="stat"><div class="stat-value"><span class="delta-badge ${dTokens.cls}">${dTokens.pct > 0 ? '+' : ''}${fmt(dTokens.pct)}%</span></div><div class="stat-label">Token Delta</div></div>`;
+    html += '</div>';
+  }
+
+  return html;
+}
+
+/* ── CLI Benchmark Comparison ──────────────────────────── */
+function renderCliComparison(cliRuns) {
+  let html = '<h2>CLI Benchmark Comparison</h2>';
+
+  // Get all unique test IDs across runs
+  const allIds = new Set();
+  for (const name of cliRuns) {
+    for (const r of allRuns[name].runs) allIds.add(r.id);
+  }
+
+  // Table with all runs as columns
+  html += '<table><tr><th>Test Case</th>';
+  for (const name of cliRuns) {
+    html += `<th class="num">${name}<br><small>ms</small></th>`;
+    html += `<th class="num">${name}<br><small>tokens</small></th>`;
+  }
+  if (cliRuns.length >= 2) {
+    html += `<th class="num">Delta<br><small>ms</small></th>`;
+    html += `<th class="num">Delta<br><small>tokens</small></th>`;
+  }
+  html += '</tr>';
+
+  for (const id of allIds) {
+    html += `<tr><td><strong>${id}</strong></td>`;
+    const vals = cliRuns.map(name => {
+      const r = allRuns[name].runs.find(r => r.id === id);
+      return r || null;
+    });
+    for (const r of vals) {
+      html += `<td class="num">${r ? fmt(r.elapsed_ms) : '-'}</td>`;
+      html += `<td class="num">${r ? fmtInt(r.est_tokens) : '-'}</td>`;
+    }
+    if (cliRuns.length >= 2) {
+      const first = vals[0], last = vals[vals.length - 1];
+      if (first && last) {
+        const dms = last.elapsed_ms - first.elapsed_ms;
+        const dtok = last.est_tokens - first.est_tokens;
+        html += `<td class="num ${dms < 0 ? 'neg' : dms > 0 ? 'pos' : 'zero'}">${dms > 0 ? '+' : ''}${fmt(dms)}</td>`;
+        html += `<td class="num ${dtok < 0 ? 'neg' : dtok > 0 ? 'pos' : 'zero'}">${dtok > 0 ? '+' : ''}${fmtInt(dtok)}</td>`;
+      } else {
+        html += '<td class="num">-</td><td class="num">-</td>';
+      }
+    }
+    html += '</tr>';
+  }
+
+  // Total row
+  html += '<tr class="total"><td>TOTAL</td>';
+  const cliTotals = cliRuns.map(name => totals(allRuns[name]));
+  for (const t of cliTotals) {
+    html += `<td class="num">${fmt(t.ms)}</td>`;
+    html += `<td class="num">${fmtInt(t.tokens)}</td>`;
+  }
+  if (cliRuns.length >= 2) {
+    const first = cliTotals[0], last = cliTotals[cliTotals.length - 1];
+    const dms = last.ms - first.ms, dtok = last.tokens - first.tokens;
+    html += `<td class="num ${dms < 0 ? 'neg' : 'pos'}">${dms > 0 ? '+' : ''}${fmt(dms)}</td>`;
+    html += `<td class="num ${dtok < 0 ? 'neg' : 'pos'}">${dtok > 0 ? '+' : ''}${fmtInt(dtok)}</td>`;
+  }
+  html += '</tr></table>';
+
+  // Bar chart: timing comparison
+  html += renderBarChart('Timing (ms)', cliRuns, r => r.elapsed_ms, v => fmt(v)+'ms');
+  html += renderBarChart('Token Output', cliRuns, r => r.est_tokens, v => fmtK(v));
+
+  return html;
+}
+
+/* ── LLM Benchmark Comparison ──────────────────────────── */
+function renderLlmComparison(llmRuns) {
+  let html = '<h2>LLM Benchmark Comparison</h2>';
+
+  // Group by task description (strip config suffix from id)
+  const tasks = new Map(); // description -> [{run_name, ...data}]
+  for (const name of llmRuns) {
+    for (const r of allRuns[name].runs) {
+      const desc = r.description || r.id;
+      if (!tasks.has(desc)) tasks.set(desc, []);
+      tasks.get(desc).push({...r, run_name: name, config: r.tool || name});
+    }
+  }
+
+  // Summary stats per config
+  const configs = new Map(); // config -> {tokens, cost, time, turns, count}
+  for (const name of llmRuns) {
+    for (const r of allRuns[name].runs) {
+      const cfg = r.tool || name;
+      if (!configs.has(cfg)) configs.set(cfg, {tokens:0, cost:0, time:0, turns:0, count:0});
+      const c = configs.get(cfg);
+      c.tokens += r.est_tokens; c.cost += (r.cost_usd || 0);
+      c.time += r.elapsed_ms; c.turns += (r.num_turns || 0); c.count++;
+    }
+  }
+
+  html += '<div class="stats">';
+  let ci = 0;
+  for (const [cfg, c] of configs) {
+    const color = COLORS[ci % COLORS.length];
+    html += `<div class="stat"><div class="stat-value" style="color:${color}">${cfg}</div><div class="stat-label">${fmtK(c.tokens)} tokens | $${fmt(c.cost, 3)} | ${fmt(c.time/1000)}s | ${c.turns} turns</div></div>`;
+    ci++;
+  }
+  html += '</div>';
+
+  // Per-task comparison table
+  html += '<table><tr><th>Task</th><th>Config</th><th class="num">Time (s)</th><th class="num">Tokens</th><th class="num">Turns</th><th class="num">Cost</th><th class="num">Output (B)</th></tr>';
+  for (const [desc, entries] of tasks) {
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      html += '<tr>';
+      html += i === 0 ? `<td rowspan="${entries.length}"><strong>${desc}</strong></td>` : '';
+      html += `<td><span class="tool-badge badge-llm">${e.config}</span></td>`;
+      html += `<td class="num">${fmt(e.elapsed_ms / 1000)}</td>`;
+      html += `<td class="num">${fmtK(e.est_tokens)}</td>`;
+      html += `<td class="num">${e.num_turns || '-'}</td>`;
+      html += `<td class="num">${e.cost_usd ? '$'+fmt(e.cost_usd, 3) : '-'}</td>`;
+      html += `<td class="num">${fmtInt(e.output_bytes)}</td>`;
+      html += '</tr>';
+    }
+  }
+  html += '</table>';
+
+  // Token comparison chart grouped by task
+  const configNames = [...configs.keys()];
+  html += '<h3>Tokens by Task & Config</h3>';
+  html += '<div class="legend">';
+  configNames.forEach((c, i) => {
+    html += `<div class="legend-item"><div class="legend-swatch" style="background:${COLORS[i%COLORS.length]}"></div>${c}</div>`;
+  });
+  html += '</div>';
+
+  const maxTok = Math.max(...[...tasks.values()].flatMap(es => es.map(e => e.est_tokens)), 1);
+  html += '<div class="chart-section">';
+  for (const [desc, entries] of tasks) {
+    html += `<div class="chart-row"><div class="chart-label">${desc}</div><div class="chart-bars">`;
+    for (const e of entries) {
+      const ci = configNames.indexOf(e.config);
+      const w = Math.max(0.5, e.est_tokens / maxTok * 100);
+      html += `<div class="bar-container"><div class="bar" style="width:${w}%;background:${COLORS[ci%COLORS.length]}"></div><div class="bar-label">${e.config}: ${fmtK(e.est_tokens)} tok${e.cost_usd ? ' ($'+fmt(e.cost_usd,3)+')' : ''}</div></div>`;
+    }
+    html += '</div></div>';
+  }
+  html += '</div>';
+
+  // Cost chart
+  const maxCost = Math.max(...[...tasks.values()].flatMap(es => es.map(e => e.cost_usd || 0)), 0.001);
+  if (maxCost > 0) {
+    html += '<h3>Cost by Task & Config</h3>';
+    html += '<div class="chart-section">';
+    for (const [desc, entries] of tasks) {
+      const costEntries = entries.filter(e => e.cost_usd > 0);
+      if (!costEntries.length) continue;
+      html += `<div class="chart-row"><div class="chart-label">${desc}</div><div class="chart-bars">`;
+      for (const e of costEntries) {
+        const ci = configNames.indexOf(e.config);
+        const w = Math.max(0.5, (e.cost_usd || 0) / maxCost * 100);
+        html += `<div class="bar-container"><div class="bar" style="width:${w}%;background:${COLORS[ci%COLORS.length]}"></div><div class="bar-label">${e.config}: $${fmt(e.cost_usd, 3)}</div></div>`;
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+  }
+
+  return html;
+}
+
+/* ── Single Run Detail ─────────────────────────────────── */
+function renderSingleRun(name, data) {
+  const t = totals(data);
+  let html = `<h2>${name}</h2>`;
+
+  html += '<div class="stats">';
+  html += `<div class="stat"><div class="stat-value v-accent">${t.count}</div><div class="stat-label">Test Cases</div></div>`;
+  html += `<div class="stat"><div class="stat-value v-cyan">${t.ms >= 1000 ? fmt(t.ms/1000)+'s' : fmt(t.ms)+'ms'}</div><div class="stat-label">Total Time</div></div>`;
+  html += `<div class="stat"><div class="stat-value v-green">${fmtK(t.tokens)}</div><div class="stat-label">Tokens</div></div>`;
+  html += `<div class="stat"><div class="stat-value">${fmtInt(t.bytes)}</div><div class="stat-label">Output Bytes</div></div>`;
+  if (t.cost > 0) html += `<div class="stat"><div class="stat-value v-yellow">$${fmt(t.cost, 3)}</div><div class="stat-label">Cost</div></div>`;
+  if (t.turns > 0) html += `<div class="stat"><div class="stat-value v-purple">${t.turns}</div><div class="stat-label">Total Turns</div></div>`;
+  html += '</div>';
+
+  // Detail table
+  html += '<table><tr><th>ID</th><th>Description</th><th>Tool</th><th class="num">Time</th><th class="num">Tokens</th><th class="num">Bytes</th>';
+  if (data.runs.some(r => r.cost_usd)) html += '<th class="num">Cost</th>';
+  if (data.runs.some(r => r.num_turns)) html += '<th class="num">Turns</th>';
+  html += '</tr>';
+
+  for (const r of data.runs) {
+    html += `<tr><td><strong>${r.id}</strong></td><td>${r.description || ''}</td>`;
+    html += `<td><span class="tool-badge badge-cli">${r.tool}</span></td>`;
+    html += `<td class="num">${r.elapsed_ms >= 1000 ? fmt(r.elapsed_ms/1000)+'s' : fmt(r.elapsed_ms)+'ms'}</td>`;
+    html += `<td class="num">${fmtInt(r.est_tokens)}</td>`;
+    html += `<td class="num">${fmtInt(r.output_bytes)}</td>`;
+    if (data.runs.some(r => r.cost_usd)) html += `<td class="num">${r.cost_usd ? '$'+fmt(r.cost_usd, 3) : '-'}</td>`;
+    if (data.runs.some(r => r.num_turns)) html += `<td class="num">${r.num_turns || '-'}</td>`;
+    html += '</tr>';
+  }
+
+  html += '<tr class="total"><td>TOTAL</td><td></td><td></td>';
+  html += `<td class="num">${t.ms >= 1000 ? fmt(t.ms/1000)+'s' : fmt(t.ms)+'ms'}</td>`;
+  html += `<td class="num">${fmtInt(t.tokens)}</td>`;
+  html += `<td class="num">${fmtInt(t.bytes)}</td>`;
+  if (data.runs.some(r => r.cost_usd)) html += `<td class="num">$${fmt(t.cost, 3)}</td>`;
+  if (data.runs.some(r => r.num_turns)) html += `<td class="num">${t.turns}</td>`;
+  html += '</tr></table>';
+
+  // Timing bar chart
+  const maxMs = Math.max(...data.runs.map(r => r.elapsed_ms), 1);
+  html += '<h3>Timing</h3><div class="chart-section">';
+  for (const r of data.runs) {
+    const w = Math.max(0.5, r.elapsed_ms / maxMs * 100);
+    html += `<div class="chart-row"><div class="chart-label">${r.id}</div><div class="chart-bars">`;
+    html += `<div class="bar-container"><div class="bar" style="width:${w}%;background:var(--accent)"></div><div class="bar-label">${r.elapsed_ms >= 1000 ? fmt(r.elapsed_ms/1000)+'s' : fmt(r.elapsed_ms)+'ms'}</div></div>`;
+    html += '</div></div>';
+  }
+  html += '</div>';
+
+  return html;
+}
+
+/* ── Shared bar chart renderer ─────────────────────────── */
+function renderBarChart(title, runNames, valueExtractor, valueFmt) {
+  const allIds = new Set();
+  for (const name of runNames) {
+    for (const r of allRuns[name].runs) allIds.add(r.id);
+  }
+
+  const maxVal = Math.max(...runNames.flatMap(name => allRuns[name].runs.map(valueExtractor)), 1);
+
+  let html = `<h3>${title}</h3>`;
+  html += '<div class="legend">';
+  runNames.forEach((n, i) => {
+    html += `<div class="legend-item"><div class="legend-swatch" style="background:${COLORS[i%COLORS.length]}"></div>${n}</div>`;
+  });
+  html += '</div>';
+  html += '<div class="chart-section">';
+
+  for (const id of allIds) {
+    html += `<div class="chart-row"><div class="chart-label">${id}</div><div class="chart-bars">`;
+    for (let i = 0; i < runNames.length; i++) {
+      const r = allRuns[runNames[i]].runs.find(r => r.id === id);
+      if (!r) continue;
+      const v = valueExtractor(r);
+      const w = Math.max(0.5, v / maxVal * 100);
+      html += `<div class="bar-container"><div class="bar" style="width:${w}%;background:${COLORS[i%COLORS.length]}"></div><div class="bar-label">${valueFmt(v)}</div></div>`;
+    }
+    html += '</div></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+init();
+</script>
+</body>
+</html>

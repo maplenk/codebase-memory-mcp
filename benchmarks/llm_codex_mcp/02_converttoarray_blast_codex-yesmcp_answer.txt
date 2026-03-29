@@ -1,0 +1,42 @@
+**Blast Radius**
+
+`convertToArray` in [app/helpers.php#L1296](/Users/naman/Documents/QBApps/qbapi/app/helpers.php#L1296) is a core data-shaping contract, not a local utility. The MCP `impact` pass marked it `high` and surfaced thousands of inbound uses. I cross-checked at source level because the graph count was noisy: there are **6,253 distinct functions/methods** calling it, across **323 PHP files**, with **12,281 call sites**.
+
+**Most Critical Callers**
+
+- Order ingestion: [app/Http/Controllers/OrderController.php#L531](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php#L531) converts request JSON, then immediately uses array keys like `$data["chainID"]`.
+- Core order processing: [app/Order.php#L7900](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L7900) is one of the densest callers and repeatedly dereferences `[0]['...']` and nested arrays.
+- Chain provisioning: [app/chainSetup.php#L13249](/Users/naman/Documents/QBApps/qbapi/app/chainSetup.php#L13249) reads `SHOW CREATE TABLE` output via `$getOldStructure[0]["Create Table"]`; changing type here risks setup/provisioning failures.
+- Third-party tracking/integrations: [app/Http/Controllers/thirdPartyController.php#L2018](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/thirdPartyController.php#L2018) uses both `[0]['...']` and direct `['apiTrackerID']` access.
+- Appointment flows: [app/Appointment.php#L642](/Users/naman/Documents/QBApps/qbapi/app/Appointment.php#L642) converts request payloads and then uses keyed array access like `$dataArray['timezone']`.
+- Admin/reporting are also heavily exposed: `app/Admin.php`, `app/report.php`, and `app/v2/report.php` are among the highest-density files.
+
+**If Return Type Changes To Object**
+
+- If you simply flip `json_decode(..., true)` to object mode, the helper itself is likely to break before callers do. Its sanitization loop in [app/helpers.php#L1310](/Users/naman/Documents/QBApps/qbapi/app/helpers.php#L1310) treats non-arrays as scalar values and passes them into `htmlentities`; `stdClass` values would fail there.
+- Even if you rewrote the helper to return objects cleanly, a very large part of the app would still break on array-style access:
+  - `$data["chainID"]` in [app/Http/Controllers/OrderController.php#L543](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/OrderController.php#L543)
+  - `$dataArray['timezone']` in [app/Appointment.php#L650](/Users/naman/Documents/QBApps/qbapi/app/Appointment.php#L650)
+  - `$getDefaultThirdPartyChainID[0]['defaultSuperChainForIntegration']` in [app/Http/Controllers/thirdPartyController.php#L2019](/Users/naman/Documents/QBApps/qbapi/app/Http/Controllers/thirdPartyController.php#L2019)
+  - `$getOldStructure[0]["Create Table"]` in [app/chainSetup.php#L13251](/Users/naman/Documents/QBApps/qbapi/app/chainSetup.php#L13251)
+- Any code expecting array semantics like `[0]`, `array_column`, `array_push`, `count` on arrays of rows, or nested associative arrays would need refactoring.
+
+**Tests To Run**
+
+- Run the full PHPUnit suite first. There are only **13 test files**, and coverage here is thin.
+- The only obvious existing test that touches a `convertToArray`-using path is [tests/Unit/FiscalYearTest.php#L58](/Users/naman/Documents/QBApps/qbapi/tests/Unit/FiscalYearTest.php#L58), via `chainSetup::getChainLicenses`.
+- I found **no direct tests** for `convertToArray`, and no meaningful automated coverage for order posting, admin/reporting, or third-party tracking paths.
+- Before changing this contract, add targeted tests for:
+  - `convertToArray` itself
+  - `OrderController::postOrd` / `Order::postOrder`
+  - `Appointment::validate`
+  - `thirdPartyController::requestTracker`
+  - `chainSetup::createChainTable` and `getChainLicenses`
+
+**Risk**
+
+**CRITICAL**
+
+Changing `convertToArray` from array to object in place is not a safe refactor. If object output is needed, the defensible path is a new helper or an opt-in variant, not a contract change to the existing function.
+
+I did not run the test suite.

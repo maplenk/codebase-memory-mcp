@@ -1,0 +1,37 @@
+`creditSettlement` enters at [app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L2581). The flow is: load customer/order context, read unpaid `PAYMENT_CREDIT` rows, reduce those rows, insert real payment rows, write accounting, mirror into invoice payments, update order payment status, then update customer balances.
+
+The important bug is that `isNoCharge` was not checked in the generic settlement path. The closest settlement-adjacent no-charge handling I found was in reporting/UI code, where no-charge orders are zeroed out for display in [app/thirdParty.php](/Users/naman/Documents/QBApps/qbapi/app/thirdParty.php#L2432), but neither `creditSettlement` nor its auto-settlement caller protected against `isNoCharge=1`.
+
+Why it double-counts:
+- `creditSettlement` treated no-charge orders like regular credit orders.
+- `postAdvancePayment` auto-collected unpaid credit orders without filtering out no-charge orders in [app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L3595).
+- That lets a no-charge order enter the normal credit-settlement flow, so regular settlement records get added on top of the no-charge handling.
+
+I applied the fix in [app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php):
+- Added an early guard in `creditSettlement` to reject any `orderID` with `isNoCharge = 1` before balances are mutated, at [app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L2740).
+- Tightened the `postAdvancePayment` unpaid-order query to include `os.isNoCharge = 0`, at [app/Order.php](/Users/naman/Documents/QBApps/qbapi/app/Order.php#L3609).
+
+Exact change:
+```php
+$noChargeOrders = convertToArray(
+    DB::table($chainOrderSummaryTable)
+        ->whereIn('orderID', $orderIDArray)
+        ->where('isNoCharge', 1)
+        ->select('orderID')
+        ->distinct()
+        ->get()
+);
+if (!empty($noChargeOrders)) {
+    $status["status"] = false;
+    $status["message"] = "Credit settlement is not allowed for no-charge orders";
+    $status["orderIDs"] = array_column($noChargeOrders, 'orderID');
+    return $status;
+}
+```
+
+and:
+```php
+"WHERE os.customersIDs = ? AND os.paymentStatus != ? AND os.isNoCharge = 0 AND op.paymentType = ? AND op.amount > 0 "
+```
+
+Verification: `php -l app/Order.php` passed. I did not run broader automated tests.

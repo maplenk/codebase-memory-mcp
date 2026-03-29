@@ -1,0 +1,76 @@
+[
+  {
+    "id": "locate_order",
+    "description": "Find code related to order processing",
+    "tool": "search_graph",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "name_pattern": "order", "node_types": ["Function", "Method"], "limit": 20},
+    "expected_files": ["OrderController.php", "basicAppController.php"],
+    "expected_symbols": ["postOrd", "creditSettlement", "settleOrder"]
+  },
+  {
+    "id": "locate_payment",
+    "description": "Find payment settlement code",
+    "tool": "search_graph",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "name_pattern": "payment", "node_types": ["Function", "Method"], "limit": 20},
+    "expected_files": ["OrderController.php", "PaymentMappingService.php"],
+    "expected_symbols": ["creditSettlement", "settleOrder"]
+  },
+  {
+    "id": "locate_inventory",
+    "description": "Find inventory/stock management code",
+    "tool": "search_graph",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "name_pattern": "inventory", "node_types": ["Function", "Method"], "limit": 20},
+    "expected_files": ["InventoryController.php"],
+    "expected_symbols": ["getStoreWiseInventory"]
+  },
+  {
+    "id": "impact_postord",
+    "description": "Blast radius of changing postOrd",
+    "tool": "get_impact_analysis",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "symbol": "postOrd", "depth": 3},
+    "expected_in_blast": ["sendReceipt", "creditSettlement"],
+    "expected_risk": "CRITICAL"
+  },
+  {
+    "id": "impact_converttoarray",
+    "description": "Blast radius of convertToArray",
+    "tool": "get_impact_analysis",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "symbol": "convertToArray", "depth": 2},
+    "expected_risk": "CRITICAL"
+  },
+  {
+    "id": "trace_order_to_receipt",
+    "description": "Trace call path from postOrd to sendReceipt",
+    "tool": "trace_call_path",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "function_name": "postOrd", "direction": "callees", "depth": 5},
+    "expected_path_exists": true
+  },
+  {
+    "id": "architecture_overview",
+    "description": "Get architecture overview of qbapi",
+    "tool": "get_architecture",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi"},
+    "expected_contains": ["Controllers", "Services"]
+  },
+  {
+    "id": "explore_loyalty",
+    "description": "Explore loyalty system",
+    "tool": "explore",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "area": "loyalty"},
+    "expected_contains": ["loyalty"]
+  },
+  {
+    "id": "understand_creditsettlement",
+    "description": "Understand creditSettlement function",
+    "tool": "understand",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "symbol": "creditSettlement"},
+    "expected_contains": ["creditSettlement"]
+  },
+  {
+    "id": "key_symbols_global",
+    "description": "Get globally important symbols by PageRank",
+    "tool": "get_key_symbols",
+    "args": {"project": "Users-naman-Documents-QBApps-qbapi", "limit": 20},
+    "expected_top": ["convertToArray", "sanitize", "isJson"]
+  }
+]
