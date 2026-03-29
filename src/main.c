@@ -150,11 +150,14 @@ static void print_help(void) {
     printf("\nSupported agents (auto-detected):\n");
     printf("  Claude Code, Codex CLI, Gemini CLI, Zed, OpenCode, Antigravity, Aider, KiloCode\n");
     printf("\nTools (v2):\n");
-    printf("  context    — Find relevant code (modes: locate, explore, architecture, symbols, session, summary)\n");
+    printf("  context    — Find relevant code (modes: locate, explore, architecture, symbols, "
+           "session, summary)\n");
     printf("  impact     — Blast radius + tracing (modes: blast, trace, prepare)\n");
-    printf("  read_symbol — Read source for a function/class (with: none, callers, callees, both)\n");
+    printf(
+        "  read_symbol — Read source for a function/class (with: none, callers, callees, both)\n");
     printf("  query      — Cypher queries or graph schema\n");
-    printf("  index      — Index/status/list/delete projects (actions: index, status, list, delete, changes)\n");
+    printf("  index      — Index/status/list/delete projects (actions: index, status, list, "
+           "delete, changes)\n");
     printf("\n  Legacy tool names (v1) are supported as aliases.\n");
 }
 

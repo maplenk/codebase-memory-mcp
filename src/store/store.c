@@ -282,11 +282,13 @@ static int init_schema(cbm_store_t *s) {
  * "OauthMiddleware" → "Oauth Middleware"
  * Includes original name + split version for FTS5 indexing. */
 static char *camel_case_split(const char *name) {
-    if (!name || !name[0]) return strdup("");
+    if (!name || !name[0])
+        return strdup("");
     size_t len = strlen(name);
     /* Worst case: space before every char + original + space + null */
     char *out = malloc(len * 2 + len + 2);
-    if (!out) return strdup("");
+    if (!out)
+        return strdup("");
 
     /* First: copy original name */
     size_t o = 0;
@@ -296,8 +298,7 @@ static char *camel_case_split(const char *name) {
 
     /* Then: split CamelCase */
     for (size_t i = 0; i < len; i++) {
-        if (i > 0 && name[i] >= 'A' && name[i] <= 'Z' &&
-            name[i-1] >= 'a' && name[i-1] <= 'z') {
+        if (i > 0 && name[i] >= 'A' && name[i] <= 'Z' && name[i - 1] >= 'a' && name[i - 1] <= 'z') {
             out[o++] = ' '; /* lowercase→uppercase transition */
         }
         out[o++] = name[i];
@@ -315,7 +316,8 @@ static char *build_search_terms(const char *name, const char *file_path) {
     const char *basename = file_path;
     if (file_path) {
         const char *last_slash = strrchr(file_path, '/');
-        if (last_slash) basename = last_slash + 1;
+        if (last_slash)
+            basename = last_slash + 1;
     }
     /* Remove extension */
     char base_no_ext[256];
@@ -323,7 +325,8 @@ static char *build_search_terms(const char *name, const char *file_path) {
         strncpy(base_no_ext, basename, sizeof(base_no_ext) - 1);
         base_no_ext[sizeof(base_no_ext) - 1] = '\0';
         char *dot = strrchr(base_no_ext, '.');
-        if (dot) *dot = '\0';
+        if (dot)
+            *dot = '\0';
     } else {
         base_no_ext[0] = '\0';
     }
@@ -333,18 +336,20 @@ static char *build_search_terms(const char *name, const char *file_path) {
     char *result = malloc(total);
     if (result) {
         snprintf(result, total, "%s %s", name_split, base_split);
+    } else {
+        result = strdup("");
     }
     free(name_split);
     free(base_split);
-    return result ? result : strdup("");
+    return result;
 }
 
 /* Migrate existing databases: add columns that may not exist yet. */
 static int migrate_schema(cbm_store_t *s) {
     /* Check if betweenness column exists in node_scores */
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(s->db, "SELECT betweenness FROM node_scores LIMIT 0;", -1, &stmt,
-                                NULL);
+    int rc =
+        sqlite3_prepare_v2(s->db, "SELECT betweenness FROM node_scores LIMIT 0;", -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         rc = exec_sql(s, "ALTER TABLE node_scores ADD COLUMN betweenness REAL NOT NULL DEFAULT 0;");
         if (rc != CBM_STORE_OK) {
@@ -364,19 +369,18 @@ static int migrate_schema(cbm_store_t *s) {
         }
         /* Drop FTS table so create_fts_table rebuilds with new column */
         exec_sql(s, "DROP TRIGGER IF EXISTS nodes_ai;"
-                     "DROP TRIGGER IF EXISTS nodes_ad;"
-                     "DROP TRIGGER IF EXISTS nodes_au;"
-                     "DROP TABLE IF EXISTS node_fts;");
+                    "DROP TRIGGER IF EXISTS nodes_ad;"
+                    "DROP TRIGGER IF EXISTS nodes_au;"
+                    "DROP TABLE IF EXISTS node_fts;");
         /* Backfill search_terms for all existing nodes */
         {
             sqlite3_stmt *fill = NULL;
-            int frc = sqlite3_prepare_v2(s->db,
-                "SELECT id, name, file_path FROM nodes;", -1, &fill, NULL);
+            int frc = sqlite3_prepare_v2(s->db, "SELECT id, name, file_path FROM nodes;", -1, &fill,
+                                         NULL);
             if (frc == SQLITE_OK) {
                 sqlite3_stmt *upd = NULL;
-                frc = sqlite3_prepare_v2(s->db,
-                    "UPDATE nodes SET search_terms = ?1 WHERE id = ?2;",
-                    -1, &upd, NULL);
+                frc = sqlite3_prepare_v2(s->db, "UPDATE nodes SET search_terms = ?1 WHERE id = ?2;",
+                                         -1, &upd, NULL);
                 if (frc == SQLITE_OK) {
                     while (sqlite3_step(fill) == SQLITE_ROW) {
                         int64_t id = sqlite3_column_int64(fill, 0);
@@ -403,12 +407,11 @@ static int migrate_schema(cbm_store_t *s) {
 
 /* Create FTS5 virtual table for full-text search on nodes. */
 static int create_fts_table(cbm_store_t *s) {
-    const char *fts_ddl =
-        "CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5("
-        "  name, qualified_name, file_path, search_terms,"
-        "  content=nodes, content_rowid=id,"
-        "  tokenize='unicode61 tokenchars _'"
-        ");";
+    const char *fts_ddl = "CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5("
+                          "  name, qualified_name, file_path, search_terms,"
+                          "  content=nodes, content_rowid=id,"
+                          "  tokenize='unicode61 tokenchars _'"
+                          ");";
     int rc = exec_sql(s, fts_ddl);
     if (rc != CBM_STORE_OK) {
         return rc;
@@ -422,16 +425,19 @@ static int create_fts_table(cbm_store_t *s) {
         "END;"
         "CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN"
         "  INSERT INTO node_fts(node_fts, rowid, name, qualified_name, file_path, search_terms)"
-        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path, old.search_terms);"
+        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path, "
+        "old.search_terms);"
         "END;"
         "CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN"
         "  INSERT INTO node_fts(node_fts, rowid, name, qualified_name, file_path, search_terms)"
-        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path, old.search_terms);"
+        "    VALUES ('delete', old.id, old.name, old.qualified_name, old.file_path, "
+        "old.search_terms);"
         "  INSERT INTO node_fts(rowid, name, qualified_name, file_path, search_terms)"
         "    VALUES (new.id, new.name, new.qualified_name, new.file_path, new.search_terms);"
         "END;";
     rc = exec_sql(s, triggers);
-    if (rc != CBM_STORE_OK) return rc;
+    if (rc != CBM_STORE_OK)
+        return rc;
 
     /* Rebuild FTS5 content from nodes table.
      * Needed after migration adds search_terms and drops/recreates FTS5.
@@ -451,7 +457,8 @@ static int create_user_indexes(cbm_store_t *s) {
         "CREATE INDEX IF NOT EXISTS idx_edges_target_type ON edges(project, target_id, type);"
         "CREATE INDEX IF NOT EXISTS idx_edges_source_type ON edges(project, source_id, type);"
         "CREATE INDEX IF NOT EXISTS idx_node_scores_rank ON node_scores(project, pagerank DESC);"
-        "CREATE INDEX IF NOT EXISTS idx_node_scores_betweenness ON node_scores(project, betweenness DESC);";
+        "CREATE INDEX IF NOT EXISTS idx_node_scores_betweenness ON node_scores(project, "
+        "betweenness DESC);";
     return exec_sql(s, sql);
 }
 
@@ -2343,8 +2350,8 @@ int cbm_store_compute_betweenness(cbm_store_t *s, const char *project) {
     double *betweenness = NULL;
 
     /* Adjacency list representation */
-    int *adj_offsets = NULL;  /* adj_offsets[i]..adj_offsets[i+1] = neighbors of i */
-    int *adj_list = NULL;     /* flat neighbor indices */
+    int *adj_offsets = NULL; /* adj_offsets[i]..adj_offsets[i+1] = neighbors of i */
+    int *adj_list = NULL;    /* flat neighbor indices */
     int adj_count = 0;
     int *out_deg = NULL;
 
@@ -2528,7 +2535,8 @@ int cbm_store_compute_betweenness(cbm_store_t *s, const char *project) {
                     /* Record v as predecessor of w */
                     if (pred_count[w] >= pred_cap[w]) {
                         int new_cap = pred_cap[w] > 0 ? pred_cap[w] * 2 : 4;
-                        predecessors[w] = safe_realloc(predecessors[w], (size_t)new_cap * sizeof(int));
+                        predecessors[w] =
+                            safe_realloc(predecessors[w], (size_t)new_cap * sizeof(int));
                         pred_cap[w] = new_cap;
                     }
                     predecessors[w][pred_count[w]++] = v;
@@ -2576,8 +2584,7 @@ int cbm_store_compute_betweenness(cbm_store_t *s, const char *project) {
 
     /* 6. Store betweenness in node_scores table */
     rc = sqlite3_prepare_v2(
-        s->db,
-        "UPDATE node_scores SET betweenness = ?1 WHERE project = ?2 AND node_id = ?3;", -1,
+        s->db, "UPDATE node_scores SET betweenness = ?1 WHERE project = ?2 AND node_id = ?3;", -1,
         &update_stmt, NULL);
     if (rc != SQLITE_OK) {
         store_set_error_sqlite(s, "betweenness.update");
@@ -2830,15 +2837,14 @@ int cbm_store_compute_personalized_pagerank(cbm_store_t *s, const char *project,
 
         /* Base: teleport + dangling redistribution proportional to teleport */
         for (int i = 0; i < node_count; i++) {
-            next_scores[i] =
-                (1.0 - damping) * teleport[i] + damping * dangling_mass * teleport[i];
+            next_scores[i] = (1.0 - damping) * teleport[i] + damping * dangling_mass * teleport[i];
         }
 
         /* Edge contributions: weighted flow */
         for (int e = 0; e < edge_count; e++) {
             int si = edges[e].src_idx;
-            int di = edges[e].dst_idx;
             if (weighted_out[si] > 0.0) {
+                int di = edges[e].dst_idx;
                 next_scores[di] += damping * scores[si] * (edges[e].weight / weighted_out[si]);
             }
         }
@@ -2934,21 +2940,21 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
         /* Common English stop words — these generate too much noise in
          * code search (e.g. "checks*" matches 100s of checkXxx functions). */
         static const char *stop_words[] = {
-            "a","an","and","are","as","at","be","by","do","for","from",
-            "has","have","how","if","in","is","it","its","of","on","or",
-            "the","that","this","to","was","what","when","where","which",
-            "who","will","with","all","also","but","can","does","each",
-            "end","new","not","out","than","them","then","they","up",
-            "complete","flow","happens","places","checks","creates",
-            "finds","gets","handles","makes","every","there",
-            NULL
-        };
+            "a",    "an",       "and",   "are",     "as",     "at",     "be",      "by",
+            "do",   "for",      "from",  "has",     "have",   "how",    "if",      "in",
+            "is",   "it",       "its",   "of",      "on",     "or",     "the",     "that",
+            "this", "to",       "was",   "what",    "when",   "where",  "which",   "who",
+            "will", "with",     "all",   "also",    "but",    "can",    "does",    "each",
+            "end",  "new",      "not",   "out",     "than",   "them",   "then",    "they",
+            "up",   "complete", "flow",  "happens", "places", "checks", "creates", "finds",
+            "gets", "handles",  "makes", "every",   "there",  NULL};
         size_t qlen = strlen(query);
         /* Tokenize query into words, skip stop words, build FTS5 expression */
         char *qcopy = malloc(qlen + 1);
         char *fts_query = malloc(qlen * 6 + 16);
         if (!qcopy || !fts_query) {
-            free(qcopy); free(fts_query);
+            free(qcopy);
+            free(fts_query);
             sqlite3_finalize(stmt);
             return CBM_STORE_ERR;
         }
@@ -2962,7 +2968,10 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
             /* Check against stop words (case-insensitive) */
             bool is_stop = false;
             for (const char **sw = stop_words; *sw; sw++) {
-                if (strcasecmp(tok, *sw) == 0) { is_stop = true; break; }
+                if (strcasecmp(tok, *sw) == 0) {
+                    is_stop = true;
+                    break;
+                }
             }
             if (!is_stop && strlen(tok) >= 2) {
                 if (had_word) {
@@ -2993,11 +3002,14 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
     bind_text(stmt, 2, project);
     sqlite3_bind_int(stmt, 3, 500); /* fetch extra candidates for per-file capping */
 
-    /* Per-file cap: prevent any single file from contributing > 5 results.
-     * Track (file_path_hash, count) pairs with linear scan. */
-    #define PER_FILE_CAP 3
-    #define FILE_TRACK_CAP 128
-    struct { uint64_t hash; int count; } file_counts[FILE_TRACK_CAP];
+/* Per-file cap: prevent any single file from contributing > 5 results.
+ * Track (file_path_hash, count) pairs with linear scan. */
+#define PER_FILE_CAP 3
+#define FILE_TRACK_CAP 128
+    struct {
+        uint64_t hash;
+        int count;
+    } file_counts[FILE_TRACK_CAP];
     int num_files = 0;
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -3011,7 +3023,10 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
             }
             int fi = -1;
             for (int j = 0; j < num_files; j++) {
-                if (file_counts[j].hash == h) { fi = j; break; }
+                if (file_counts[j].hash == h) {
+                    fi = j;
+                    break;
+                }
             }
             if (fi < 0 && num_files < FILE_TRACK_CAP) {
                 fi = num_files++;
@@ -3019,11 +3034,13 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
                 file_counts[fi].count = 0;
             }
             if (fi >= 0) {
-                if (file_counts[fi].count >= PER_FILE_CAP) continue; /* skip */
+                if (file_counts[fi].count >= PER_FILE_CAP)
+                    continue; /* skip */
                 file_counts[fi].count++;
             }
         }
-        if (n >= limit) break; /* we have enough */
+        if (n >= limit)
+            break; /* we have enough */
         if (n >= cap) {
             cap = cap > 0 ? cap * 2 : 32;
             ids = safe_realloc(ids, (size_t)cap * sizeof(int64_t));
@@ -3044,8 +3061,8 @@ int cbm_store_fts_search(cbm_store_t *s, const char *project, const char *query,
 /* ── Composite Ranked Search ───────────────────────────────────── */
 
 /* Weights for composite scoring */
-#define W_PPR     0.35
-#define W_BM25    0.30
+#define W_PPR 0.35
+#define W_BM25 0.30
 #define W_COCHANGE 0.20
 #define W_BETWEENNESS 0.15
 
@@ -3061,8 +3078,8 @@ static int ranked_result_cmp(const void *a, const void *b) {
     return 0;
 }
 
-int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *query,
-                            int max_results, cbm_ranked_result_t **out, int *out_count) {
+int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *query, int max_results,
+                            cbm_ranked_result_t **out, int *out_count) {
     int rc = CBM_STORE_OK;
     int64_t *fts_ids = NULL;
     double *fts_scores = NULL;
@@ -3178,10 +3195,11 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
     /* Fetch node metadata */
     {
         sqlite3_stmt *ns = NULL;
-        rc = sqlite3_prepare_v2(s->db,
-                                "SELECT name, qualified_name, label, file_path, start_line, end_line "
-                                "FROM nodes WHERE id = ?1;",
-                                -1, &ns, NULL);
+        rc = sqlite3_prepare_v2(
+            s->db,
+            "SELECT name, qualified_name, label, file_path, start_line, end_line "
+            "FROM nodes WHERE id = ?1;",
+            -1, &ns, NULL);
         if (rc == SQLITE_OK) {
             for (int i = 0; i < fts_count; i++) {
                 sqlite3_reset(ns);
@@ -3201,18 +3219,17 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
         }
     }
 
-    /* Step 4: Compute composite score with in-degree authority signal.
-     * In-degree (number of incoming edges) is a simplified HITS authority:
-     * nodes called by many others are more important. Stubs from auto-generated
-     * files have 0 in-degree. We normalize to [0,1] and add as a component. */
-    #define W_AUTHORITY 0.10
+/* Step 4: Compute composite score with in-degree authority signal.
+ * In-degree (number of incoming edges) is a simplified HITS authority:
+ * nodes called by many others are more important. Stubs from auto-generated
+ * files have 0 in-degree. We normalize to [0,1] and add as a component. */
+#define W_AUTHORITY 0.10
     {
         sqlite3_stmt *id_stmt = NULL;
         int max_indeg = 1; /* avoid div by zero */
         int *indeg = calloc((size_t)fts_count, sizeof(int));
-        int id_rc = sqlite3_prepare_v2(s->db,
-            "SELECT COUNT(*) FROM edges WHERE target_id = ?1;",
-            -1, &id_stmt, NULL);
+        int id_rc = sqlite3_prepare_v2(s->db, "SELECT COUNT(*) FROM edges WHERE target_id = ?1;",
+                                       -1, &id_stmt, NULL);
         if (id_rc == SQLITE_OK && indeg) {
             for (int i = 0; i < fts_count; i++) {
                 sqlite3_reset(id_stmt);
@@ -3220,7 +3237,8 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
                 sqlite3_bind_int64(id_stmt, 1, results[i].node_id);
                 if (sqlite3_step(id_stmt) == SQLITE_ROW) {
                     indeg[i] = sqlite3_column_int(id_stmt, 0);
-                    if (indeg[i] > max_indeg) max_indeg = indeg[i];
+                    if (indeg[i] > max_indeg)
+                        max_indeg = indeg[i];
                 }
             }
             sqlite3_finalize(id_stmt);
@@ -3230,10 +3248,8 @@ int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *que
         for (int i = 0; i < fts_count; i++) {
             double auth = indeg ? (double)indeg[i] / (double)max_indeg : 0.0;
             results[i].composite_score =
-                W_PPR * results[i].ppr_score +
-                W_BM25 * results[i].bm25_score +
-                W_BETWEENNESS * results[i].betweenness +
-                W_AUTHORITY * auth;
+                W_PPR * results[i].ppr_score + W_BM25 * results[i].bm25_score +
+                W_BETWEENNESS * results[i].betweenness + W_AUTHORITY * auth;
         }
         free(indeg);
     }

@@ -271,7 +271,7 @@ fi
 echo "OK: tools/list response received (id:2)"
 
 # 5c: Verify expected tools are present
-for TOOL in index_repository search_graph trace_call_path get_code_snippet search_code; do
+for TOOL in index context impact read_symbol query; do
   if ! grep -q "\"$TOOL\"" "$MCP_OUTPUT"; then
     echo "FAIL: tool '$TOOL' not found in tools/list response"
     rm -f "$MCP_INPUT" "$MCP_OUTPUT"

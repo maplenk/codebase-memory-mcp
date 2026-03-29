@@ -737,11 +737,14 @@ typedef struct {
 static const tool_def_t TOOLS[] = {
     {"context",
      "Find relevant code for a task or query. Returns ranked files with function signatures. "
-     "Use INSTEAD OF grep/glob for code discovery. Modes: locate (default, BM25+PPR ranked search), "
-     "explore (area exploration), architecture (project overview), symbols (key symbols by PageRank), "
+     "Use INSTEAD OF grep/glob for code discovery. Modes: locate (default, BM25+PPR ranked "
+     "search), "
+     "explore (area exploration), architecture (project overview), symbols (key symbols by "
+     "PageRank), "
      "session (files/symbols touched this session), summary (compact session recap).",
      "{\"type\":\"object\",\"properties\":{"
-     "\"query\":{\"type\":\"string\",\"description\":\"What you're looking for — task, keyword, or symbol name\"},"
+     "\"query\":{\"type\":\"string\",\"description\":\"What you're looking for — task, keyword, or "
+     "symbol name\"},"
      "\"project\":{\"type\":\"string\"},"
      "\"mode\":{\"type\":\"string\",\"enum\":[\"locate\",\"explore\",\"architecture\",\"symbols\","
      "\"session\",\"summary\"],\"default\":\"locate\"},"
@@ -749,12 +752,15 @@ static const tool_def_t TOOLS[] = {
      "\"required\":[\"query\",\"project\"]}"},
 
     {"impact",
-     "Analyze blast radius of changing a symbol, trace call paths, or prepare a change review scope. "
-     "Modes: blast (default, impact analysis), trace (call path tracing), prepare (review scope + tests).",
+     "Analyze blast radius of changing a symbol, trace call paths, or prepare a change review "
+     "scope. "
+     "Modes: blast (default, impact analysis), trace (call path tracing), prepare (review scope + "
+     "tests).",
      "{\"type\":\"object\",\"properties\":{"
      "\"symbol\":{\"type\":\"string\",\"description\":\"Function, method, or class name\"},"
      "\"project\":{\"type\":\"string\"},"
-     "\"mode\":{\"type\":\"string\",\"enum\":[\"blast\",\"trace\",\"prepare\"],\"default\":\"blast\"},"
+     "\"mode\":{\"type\":\"string\",\"enum\":[\"blast\",\"trace\",\"prepare\"],\"default\":"
+     "\"blast\"},"
      "\"to\":{\"type\":\"string\",\"description\":\"Target symbol (trace mode only)\"},"
      "\"depth\":{\"type\":\"integer\",\"default\":3},"
      "\"include_tests\":{\"type\":\"boolean\",\"default\":true},"
@@ -762,15 +768,18 @@ static const tool_def_t TOOLS[] = {
      "\"required\":[\"symbol\",\"project\"]}"},
 
     {"read_symbol",
-     "Read source code for a specific function/class. Returns exact source with optional caller/callee signatures.",
+     "Read source code for a specific function/class. Returns exact source with optional "
+     "caller/callee signatures.",
      "{\"type\":\"object\",\"properties\":{"
      "\"symbol\":{\"type\":\"string\",\"description\":\"Qualified name or short function name\"},"
      "\"project\":{\"type\":\"string\"},"
-     "\"with\":{\"type\":\"string\",\"enum\":[\"none\",\"callers\",\"callees\",\"both\"],\"default\":\"none\"}},"
+     "\"with\":{\"type\":\"string\",\"enum\":[\"none\",\"callers\",\"callees\",\"both\"],"
+     "\"default\":\"none\"}},"
      "\"required\":[\"symbol\",\"project\"]}"},
 
     {"query",
-     "Execute a Cypher query or get the graph schema. Power-user escape hatch for complex graph analysis. "
+     "Execute a Cypher query or get the graph schema. Power-user escape hatch for complex graph "
+     "analysis. "
      "Omit cypher to get the schema.",
      "{\"type\":\"object\",\"properties\":{"
      "\"cypher\":{\"type\":\"string\",\"description\":\"Cypher query (omit for schema)\"},"
@@ -782,9 +791,12 @@ static const tool_def_t TOOLS[] = {
      "Index a repository, check status, list projects, or detect changes. "
      "Actions: index (default), status, list, delete, changes.",
      "{\"type\":\"object\",\"properties\":{"
-     "\"repo_path\":{\"type\":\"string\",\"description\":\"Path to the repository (for index action)\"},"
-     "\"project\":{\"type\":\"string\",\"description\":\"Project name (for status/delete/changes)\"},"
-     "\"action\":{\"type\":\"string\",\"enum\":[\"index\",\"status\",\"list\",\"delete\",\"changes\"],"
+     "\"repo_path\":{\"type\":\"string\",\"description\":\"Path to the repository (for index "
+     "action)\"},"
+     "\"project\":{\"type\":\"string\",\"description\":\"Project name (for "
+     "status/delete/changes)\"},"
+     "\"action\":{\"type\":\"string\",\"enum\":[\"index\",\"status\",\"list\",\"delete\","
+     "\"changes\"],"
      "\"default\":\"index\"},"
      "\"mode\":{\"type\":\"string\",\"enum\":[\"full\",\"fast\"],\"default\":\"full\"}},"
      "\"required\":[]}"},
@@ -4238,11 +4250,15 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
     if (ranked_count > 0 && match_count == 0) {
         for (int i = 0; i < ranked_count; i++) {
             yyjson_mut_val *item = yyjson_mut_obj(doc);
-            if (ranked[i].name) yyjson_mut_obj_add_str(doc, item, "name", ranked[i].name);
-            if (ranked[i].file_path) yyjson_mut_obj_add_str(doc, item, "file", ranked[i].file_path);
-            if (ranked[i].label) yyjson_mut_obj_add_str(doc, item, "type", ranked[i].label);
+            if (ranked[i].name)
+                yyjson_mut_obj_add_str(doc, item, "name", ranked[i].name);
+            if (ranked[i].file_path)
+                yyjson_mut_obj_add_str(doc, item, "file", ranked[i].file_path);
+            if (ranked[i].label)
+                yyjson_mut_obj_add_str(doc, item, "type", ranked[i].label);
             yyjson_mut_obj_add_real(doc, item, "score", ranked[i].composite_score);
-            if (ranked[i].start_line > 0) yyjson_mut_obj_add_int(doc, item, "line", ranked[i].start_line);
+            if (ranked[i].start_line > 0)
+                yyjson_mut_obj_add_int(doc, item, "line", ranked[i].start_line);
             yyjson_mut_arr_append(match_arr, item);
         }
     } else {
@@ -4298,35 +4314,43 @@ static char *handle_explore(cbm_mcp_server_t *srv, const char *args) {
         yyjson_mut_obj_add_bool(doc, root, "truncated", true);
         int effective_match_count = match_count > 0 ? match_count : ranked_count;
         yyjson_mut_obj_add_int(doc, root, "total_results",
-                               effective_match_count + dep_count + filtered_hotspot_count + entry_count);
+                               effective_match_count + dep_count + filtered_hotspot_count +
+                                   entry_count);
 
         size_t used = 64 + strlen(area);
         int shown = 0;
-        int full_items = 0;
         bool stop = false;
 
         match_arr = yyjson_mut_arr(doc);
         if (ranked_count > 0 && match_count == 0) {
             for (int i = 0; i < ranked_count; i++) {
                 size_t estimate = 96;
-                if (ranked[i].name) estimate += strlen(ranked[i].name);
-                if (ranked[i].file_path) estimate += strlen(ranked[i].file_path);
-                if (ranked[i].label) estimate += strlen(ranked[i].label);
+                if (ranked[i].name)
+                    estimate += strlen(ranked[i].name);
+                if (ranked[i].file_path)
+                    estimate += strlen(ranked[i].file_path);
+                if (ranked[i].label)
+                    estimate += strlen(ranked[i].label);
                 if (used + estimate > char_budget && shown > 0) {
                     stop = true;
                     break;
                 }
                 yyjson_mut_val *item = yyjson_mut_obj(doc);
-                if (ranked[i].name) yyjson_mut_obj_add_str(doc, item, "name", ranked[i].name);
-                if (ranked[i].file_path) yyjson_mut_obj_add_str(doc, item, "file", ranked[i].file_path);
-                if (ranked[i].label) yyjson_mut_obj_add_str(doc, item, "type", ranked[i].label);
+                if (ranked[i].name)
+                    yyjson_mut_obj_add_str(doc, item, "name", ranked[i].name);
+                if (ranked[i].file_path)
+                    yyjson_mut_obj_add_str(doc, item, "file", ranked[i].file_path);
+                if (ranked[i].label)
+                    yyjson_mut_obj_add_str(doc, item, "type", ranked[i].label);
                 yyjson_mut_obj_add_real(doc, item, "score", ranked[i].composite_score);
-                if (ranked[i].start_line > 0) yyjson_mut_obj_add_int(doc, item, "line", ranked[i].start_line);
+                if (ranked[i].start_line > 0)
+                    yyjson_mut_obj_add_int(doc, item, "line", ranked[i].start_line);
                 yyjson_mut_arr_append(match_arr, item);
                 used += estimate;
                 shown++;
             }
         } else {
+            int full_items = 0;
             for (int i = 0; i < match_count; i++) {
                 bool compact = full_items >= MAX_FULL_BUDGET_ITEMS;
                 size_t estimate = estimate_search_result_chars(matches[i], compact);

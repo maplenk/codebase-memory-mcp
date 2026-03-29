@@ -408,8 +408,8 @@ typedef struct {
 
 /* Composite search: FTS5 BM25 → PPR → merge with betweenness → ranked results.
  * Caller must free results with cbm_store_ranked_results_free(). */
-int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *query,
-                            int max_results, cbm_ranked_result_t **out, int *out_count);
+int cbm_store_ranked_search(cbm_store_t *s, const char *project, const char *query, int max_results,
+                            cbm_ranked_result_t **out, int *out_count);
 
 void cbm_store_ranked_results_free(cbm_ranked_result_t *results, int count);
 
